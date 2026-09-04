@@ -11,11 +11,14 @@ class AppState: ObservableObject {
 
     private init() {
         NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)
-            .sink { [weak self] _ in self?.handleActive() }.store(in: &bag)
+            .sink { [weak self] _ in Task { @MainActor in self?.handleActive() } }.store(in: &bag)
         NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)
-            .sink { [weak self] _ in self?.handleBackground() }.store(in: &bag)
+            .sink { [weak self] _ in Task { @MainActor in self?.handleBackground() } }.store(in: &bag)
     }
 
+    @MainActor
     private func handleActive() { isActive = true; WebSocketService.shared.handleAppActive(); needsRefresh = true }
+
+    @MainActor
     private func handleBackground() { isActive = false; WebSocketService.shared.handleAppBackground() }
 }
