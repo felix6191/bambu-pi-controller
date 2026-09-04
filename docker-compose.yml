@@ -1,0 +1,55 @@
+services:
+  bambu-controller:
+    build:
+      context: ./pi_backend
+      dockerfile: Dockerfile
+    container_name: bambu-controller
+    restart: unless-stopped
+    environment:
+      - PRINTER_HOST=${PRINTER_HOST}
+      - PRINTER_SERIAL=${PRINTER_SERIAL}
+      - PRINTER_ACCESS_CODE=${PRINTER_ACCESS_CODE}
+      - API_TOKEN=${API_TOKEN}
+      - CAMERA_URL=${CAMERA_URL}
+      - CAMERA_USERNAME=${CAMERA_USERNAME}
+      - CAMERA_PASSWORD=${CAMERA_PASSWORD}
+      - LOG_LEVEL=INFO
+    ports:
+      - "8000:8000"
+    networks:
+      - bambu-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Tailscale for secure remote access
+  # Run: docker run --rm -it tailscale/tailscale auth
+  # Then add TAILSCALE_AUTHKEY to .env
+  tailscale:
+    image: tailscale/tailscale:latest
+    container_name: tailscale
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+    environment:
+      - TAILSCALE_AUTHKEY=${TAILSCALE_AUTHKEY}
+      - TAILSCALE_HOSTNAME=bambu-pi
+      - TAILSCALE_ROUTES=192.168.1.0/24  # Advertise LAN routes (optional)
+    network_mode: host
+    # Alternative: use separate network with host network for Tailscale
+    # network_mode: "host"
+
+networks:
+  bambu-network:
+    driver: bridge
+
+volumes:
+  tailscale-state:
