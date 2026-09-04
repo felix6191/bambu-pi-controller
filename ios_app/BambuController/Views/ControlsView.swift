@@ -34,8 +34,9 @@ struct ControlsView: View {
             current: vm.status?.nozzleTemp ?? 0,
             target: $nozzle,
             maxTemp: 300,
-            color: .orange
-        ) { Task { await vm.setNozzleTemperature($0) } }
+            color: .orange,
+            onSet: { temp in Task { await vm.setNozzleTemperature(temp) } }
+        )
     }
 
     private var bedSection: some View {
@@ -44,8 +45,9 @@ struct ControlsView: View {
             current: vm.status?.bedTemp ?? 0,
             target: $bed,
             maxTemp: 120,
-            color: .red
-        ) { Task { await vm.setBedTemperature($0) } }
+            color: .red,
+            onSet: { temp in Task { await vm.setBedTemperature(temp) } }
+        )
     }
 
     private var speedSection: some View {
@@ -56,8 +58,9 @@ struct ControlsView: View {
             step: 5,
             unit: "%",
             current: vm.status?.printSpeed ?? 100,
-            color: .blue
-        ) { Task { await vm.setPrintSpeed($0) } }
+            color: .blue,
+            onSet: { spd in Task { await vm.setPrintSpeed(spd) } }
+        )
     }
 
     private var flowSection: some View {
@@ -68,8 +71,9 @@ struct ControlsView: View {
             step: 5,
             unit: "%",
             current: vm.status?.flowRate ?? 100,
-            color: .purple
-        ) { Task { await vm.setFlowRate($0) } }
+            color: .purple,
+            onSet: { flw in Task { await vm.setFlowRate(flw) } }
+        )
     }
 }
 
