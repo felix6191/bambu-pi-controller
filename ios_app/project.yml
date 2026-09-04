@@ -1,0 +1,41 @@
+name: BambuController
+options:
+  bundleIdPrefix: com.felix6191
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: ""  # Wird in Xcode gesetzt
+    INFOPLIST_FILE: BambuController/Resources/Info.plist
+    PRODUCT_BUNDLE_IDENTIFIER: com.felix6191.bambucontroller
+    SWIFT_EMIT_LOC_STRINGS: YES
+    ENABLE_PREVIEWS: YES
+
+targets:
+  BambuController:
+    type: application
+    platform: iOS
+    sources:
+      - path: BambuController
+    resources:
+      - path: BambuController/Resources
+    settings:
+      base:
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
+    scheme:
+      testTargets: []
+      gatherCoverageData: false
+
+schemes:
+  BambuController:
+    build:
+      targets:
+        BambuController: all
+    run:
+      config: Debug
+      executable: BambuController

@@ -7,19 +7,19 @@
 	objects = {
 
 /* Begin PBXFileReference section */
-		4F88BDCF304B86EF004A4CEC /* BambuController.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BambuController.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		4FF4FC4C304B8CF200E1DAA6 /* Bambucontroller IOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Bambucontroller IOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		4F88BDD1304B86EF004A4CEC /* BambuController */ = {
+		4FF4FC4E304B8CF200E1DAA6 /* Bambucontroller IOS */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = BambuController;
+			path = "Bambucontroller IOS";
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		4F88BDCC304B86EF004A4CEC /* Frameworks */ = {
+		4FF4FC49304B8CF200E1DAA6 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -29,18 +29,18 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		4F88BDC6304B86EF004A4CEC = {
+		4FF4FC43304B8CF200E1DAA6 = {
 			isa = PBXGroup;
 			children = (
-				4F88BDD1304B86EF004A4CEC /* BambuController */,
-				4F88BDD0304B86EF004A4CEC /* Products */,
+				4FF4FC4E304B8CF200E1DAA6 /* Bambucontroller IOS */,
+				4FF4FC4D304B8CF200E1DAA6 /* Products */,
 			);
 			sourceTree = "<group>";
 		};
-		4F88BDD0304B86EF004A4CEC /* Products */ = {
+		4FF4FC4D304B8CF200E1DAA6 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				4F88BDCF304B86EF004A4CEC /* BambuController.app */,
+				4FF4FC4C304B8CF200E1DAA6 /* Bambucontroller IOS.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -48,64 +48,64 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		4F88BDCE304B86EF004A4CEC /* BambuController */ = {
+		4FF4FC4B304B8CF200E1DAA6 /* Bambucontroller IOS */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 4F88BDDA304B86F0004A4CEC /* Build configuration list for PBXNativeTarget "BambuController" */;
+			buildConfigurationList = 4FF4FC57304B8CF300E1DAA6 /* Build configuration list for PBXNativeTarget "Bambucontroller IOS" */;
 			buildPhases = (
-				4F88BDCB304B86EF004A4CEC /* Sources */,
-				4F88BDCC304B86EF004A4CEC /* Frameworks */,
-				4F88BDCD304B86EF004A4CEC /* Resources */,
+				4FF4FC48304B8CF200E1DAA6 /* Sources */,
+				4FF4FC49304B8CF200E1DAA6 /* Frameworks */,
+				4FF4FC4A304B8CF200E1DAA6 /* Resources */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				4F88BDD1304B86EF004A4CEC /* BambuController */,
+				4FF4FC4E304B8CF200E1DAA6 /* Bambucontroller IOS */,
 			);
-			name = BambuController;
+			name = "Bambucontroller IOS";
 			packageProductDependencies = (
 			);
-			productName = BambuController;
-			productReference = 4F88BDCF304B86EF004A4CEC /* BambuController.app */;
+			productName = "Bambucontroller IOS";
+			productReference = 4FF4FC4C304B8CF200E1DAA6 /* Bambucontroller IOS.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
-		4F88BDC7304B86EF004A4CEC /* Project object */ = {
+		4FF4FC44304B8CF200E1DAA6 /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 2620;
 				LastUpgradeCheck = 2620;
 				TargetAttributes = {
-					4F88BDCE304B86EF004A4CEC = {
+					4FF4FC4B304B8CF200E1DAA6 = {
 						CreatedOnToolsVersion = 26.2;
 					};
 				};
 			};
-			buildConfigurationList = 4F88BDCA304B86EF004A4CEC /* Build configuration list for PBXProject "BambuController" */;
+			buildConfigurationList = 4FF4FC47304B8CF200E1DAA6 /* Build configuration list for PBXProject "Bambucontroller IOS" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
 				en,
 				Base,
 			);
-			mainGroup = 4F88BDC6304B86EF004A4CEC;
+			mainGroup = 4FF4FC43304B8CF200E1DAA6;
 			minimizedProjectReferenceProxies = 1;
 			preferredProjectObjectVersion = 77;
-			productRefGroup = 4F88BDD0304B86EF004A4CEC /* Products */;
+			productRefGroup = 4FF4FC4D304B8CF200E1DAA6 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				4F88BDCE304B86EF004A4CEC /* BambuController */,
+				4FF4FC4B304B8CF200E1DAA6 /* Bambucontroller IOS */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		4F88BDCD304B86EF004A4CEC /* Resources */ = {
+		4FF4FC4A304B8CF200E1DAA6 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -115,7 +115,7 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		4F88BDCB304B86EF004A4CEC /* Sources */ = {
+		4FF4FC48304B8CF200E1DAA6 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -125,7 +125,7 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
-		4F88BDD8304B86F0004A4CEC /* Debug */ = {
+		4FF4FC55304B8CF300E1DAA6 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -187,7 +187,7 @@
 			};
 			name = Debug;
 		};
-		4F88BDD9304B86F0004A4CEC /* Release */ = {
+		4FF4FC56304B8CF300E1DAA6 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -241,7 +241,7 @@
 			};
 			name = Release;
 		};
-		4F88BDDB304B86F0004A4CEC /* Debug */ = {
+		4FF4FC58304B8CF300E1DAA6 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
@@ -269,7 +269,7 @@
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 15.7;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.felixdev.bambucontroller.BambuController;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.felixdev.bambucontroller.Bambucontroller-IOS";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = auto;
@@ -285,7 +285,7 @@
 			};
 			name = Debug;
 		};
-		4F88BDDC304B86F0004A4CEC /* Release */ = {
+		4FF4FC59304B8CF300E1DAA6 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
@@ -313,7 +313,7 @@
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 15.7;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.felixdev.bambucontroller.BambuController;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.felixdev.bambucontroller.Bambucontroller-IOS";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = auto;
@@ -332,25 +332,25 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		4F88BDCA304B86EF004A4CEC /* Build configuration list for PBXProject "BambuController" */ = {
+		4FF4FC47304B8CF200E1DAA6 /* Build configuration list for PBXProject "Bambucontroller IOS" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				4F88BDD8304B86F0004A4CEC /* Debug */,
-				4F88BDD9304B86F0004A4CEC /* Release */,
+				4FF4FC55304B8CF300E1DAA6 /* Debug */,
+				4FF4FC56304B8CF300E1DAA6 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		4F88BDDA304B86F0004A4CEC /* Build configuration list for PBXNativeTarget "BambuController" */ = {
+		4FF4FC57304B8CF300E1DAA6 /* Build configuration list for PBXNativeTarget "Bambucontroller IOS" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				4F88BDDB304B86F0004A4CEC /* Debug */,
-				4F88BDDC304B86F0004A4CEC /* Release */,
+				4FF4FC58304B8CF300E1DAA6 /* Debug */,
+				4FF4FC59304B8CF300E1DAA6 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
 	};
-	rootObject = 4F88BDC7304B86EF004A4CEC /* Project object */;
+	rootObject = 4FF4FC44304B8CF200E1DAA6 /* Project object */;
 }
