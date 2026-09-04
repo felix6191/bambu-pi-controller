@@ -25,27 +25,18 @@ services:
       retries: 3
       start_period: 10s
 
-  # Tailscale for secure remote access
-  # Run: docker run --rm -it tailscale/tailscale auth
-  # Then add TAILSCALE_AUTHKEY to .env
   tailscale:
     image: tailscale/tailscale:latest
     container_name: tailscale
     restart: unless-stopped
-    cap_add:
-      - NET_ADMIN
-      - SYS_MODULE
-    devices:
-      - /dev/net/tun:/dev/net/tun
+    cap_add: [NET_ADMIN, SYS_MODULE]
+    devices: ["/dev/net/tun:/dev/net/tun"]
     volumes:
       - tailscale-state:/var/lib/tailscale
     environment:
       - TAILSCALE_AUTHKEY=${TAILSCALE_AUTHKEY}
       - TAILSCALE_HOSTNAME=bambu-pi
-      - TAILSCALE_ROUTES=192.168.1.0/24  # Advertise LAN routes (optional)
     network_mode: host
-    # Alternative: use separate network with host network for Tailscale
-    # network_mode: "host"
 
 networks:
   bambu-network:

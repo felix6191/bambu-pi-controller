@@ -29,6 +29,8 @@ Der Installer macht **alles automatisch**:
 
 **Danach:** iOS App in Xcode öffnen → auf iPhone installieren → Einstellungen eintragen → läuft weltweit.
 
+---
+
 ## Architektur
 
 ```
@@ -61,7 +63,6 @@ Der Installer macht **alles automatisch**:
 
 ### Raspberry Pi 4
 - Raspberry Pi OS (64-bit) oder Ubuntu Server 22.04+
-- Docker & Docker Compose
 - Im gleichen LAN wie der Bambu A1
 
 ### Bambu Lab A1
@@ -76,7 +77,7 @@ Der Installer macht **alles automatisch**:
 - Xcode 15+ zum Bauen
 - Tailscale App installiert
 
-## Installation
+## Manuelle Installation (falls gewünscht)
 
 ### 1. Repository klonen
 ```bash
@@ -88,39 +89,20 @@ cd bambu-pi-controller
 ```bash
 cd pi_backend
 cp .env.example .env
-# .env bearbeiten mit deinen Drucker-Daten:
-# PRINTER_HOST=192.168.1.100
-# PRINTER_SERIAL=01S00A123456789
-# PRINTER_ACCESS_CODE=12345678
-# API_TOKEN=<openssl rand -hex 32>
+# .env bearbeiten mit deinen Drucker-Daten
 ```
 
-### 3. Tailscale einrichten (für Remote-Zugriff)
+### 3. Tailscale einrichten
 ```bash
-# Auf dem Pi:
 curl -fsSL https://tailscale.com/install.sh | sh
 sudo tailscale up
-
 # Auth-Key erstellen: https://login.tailscale.com/admin/settings/keys
-# In .env eintragen:
-# TAILSCALE_AUTHKEY=tskey-xxxxxx
 ```
 
 ### 4. Docker Compose starten
 ```bash
 cd ..
 docker compose up -d --build
-```
-
-Logs prüfen:
-```bash
-docker compose logs -f bambu-controller
-```
-
-Health Check:
-```bash
-curl http://localhost:8000/health
-# {"status":"ok","printer_connected":"true"}
 ```
 
 ### 5. iOS App bauen
@@ -130,7 +112,7 @@ curl http://localhost:8000/health
 
 ### 6. App konfigurieren
 In der App unter **Einstellungen**:
-- **Server URL**: `http://<tailscale-ip-des-pi>:8000` (z.B. `http://100.x.x.x:8000`)
+- **Server URL**: `http://<tailscale-ip-des-pi>:8000`
 - **API Token**: Der gleiche wie in `.env` auf dem Pi
 - **Tailscale verwenden**: AN
 - **Auto-Verbinden**: AN
@@ -142,7 +124,7 @@ In der App unter **Einstellungen**:
 bambu-pi-controller/
 ├── pi_backend/                 # Python FastAPI Backend
 │   ├── app/
-│   │   ├── api/               # REST Endpoints (printer, camera, system)
+│   │   ├── api/               # REST Endpoints
 │   │   ├── core/              # Config, Settings
 │   │   ├── mqtt/              # Bambu MQTT Client & Protocol
 │   │   └── main.py            # FastAPI App + WebSocket
@@ -157,6 +139,8 @@ bambu-pi-controller/
 │       ├── Views/             # Dashboard, Controls, Camera, Settings
 │       └── Extensions/        # Color extensions
 ├── docker-compose.yml         # Pi + Tailscale
+├── install.sh                 # One-click installer
+├── deploy.sh                  # Deploy helper
 └── README.md
 ```
 
@@ -179,72 +163,29 @@ bambu-pi-controller/
 
 Alle Endpoints (außer `/health`) benötigen `Authorization: Bearer <API_TOKEN>`.
 
-## WebSocket Messages
-
-**Status Update** (regelmäßig):
-```json
-{
-  "type": "status",
-  "data": {
-    "state": "printing",
-    "nozzle_temp": 210.5,
-    "nozzle_target_temp": 210,
-    "bed_temp": 60.0,
-    "bed_target_temp": 60,
-    "chamber_temp": 32.5,
-    "print_job": {...},
-    "wifi_signal": -45,
-    "error_code": 0,
-    "fan_speed": 80,
-    "print_speed": 100,
-    "flow_rate": 100
-  }
-}
-```
-
-**Event** (einmalig bei Änderungen):
-```json
-{
-  "type": "event",
-  "data": {...}
-}
-```
-
 ## Entwicklung
 
 ### Pi Backend
 ```bash
 cd pi_backend
-python -m venv venv
-source venv/bin/activate
+python -m venv venv && source venv/bin/activate
 pip install -e ".[dev]"
-
-# Linting
-ruff check .
-ruff format .
-
-# Type checking
+ruff check . && ruff format .
 mypy app
-
-# Tests
 pytest
-
-# Lokal starten
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 ### iOS App
 ```bash
 cd ios_app
-# In Xcode öffnen und bauen
-# Oder per CLI:
-xcodebuild -project BambuController.xcodeproj -scheme BambuController build
+# In Xcode öffnen und bauen (Cmd+R)
 ```
 
 ## Troubleshooting
 
 ### Drucker verbindet nicht
-- Prüfen: Entwicklermodus an? IP korrekt? Access Code korrekt?
+- Entwicklermodus an? IP korrekt? Access Code korrekt?
 - Logs: `docker compose logs bambu-controller`
 - MQTT testen: `mosquitto_sub -h <PRINTER_IP> -u bblp -P <ACCESS_CODE> -t 'device/+/push'`
 
@@ -254,7 +195,7 @@ xcodebuild -project BambuController.xcodeproj -scheme BambuController build
 - In App: Tailscale-IP des Pi nutzen, nicht LAN-IP
 
 ### Kamera geht nicht
-- A1 Kamera-Stream URL: `http://<PRINTER_IP>:8080/stream` (manchmal andere Port)
+- A1 Kamera-Stream URL: `http://<PRINTER_IP>:8080/stream`
 - In `.env`: `CAMERA_URL=http://192.168.1.100:8080/stream`
 
 ## Sicherheit
@@ -262,7 +203,6 @@ xcodebuild -project BambuController.xcodeproj -scheme BambuController build
 - **API Token**: Zufälligen 32-Byte Token generieren (`openssl rand -hex 32`)
 - **Tailscale**: End-to-End verschlüsselt, kein Port-Forwarding nötig
 - **MQTT**: Nur im lokalen LAN, keine Internet-Exposition
-- **CORS**: In Produktion auf Tailscale-IPs beschränken
 
 ## Lizenz
 

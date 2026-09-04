@@ -1,19 +1,13 @@
-//  BambuControllerApp.swift
-//  BambuController
-//
-//  Created for Bambu Lab A1 remote control via Raspberry Pi
-
+// BambuControllerApp.swift - App entry point
 import SwiftUI
 
 @main
 struct BambuControllerApp: App {
-    @StateObject private var appState = AppState()
+    @StateObject private var appState = AppState.shared
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .environmentObject(appState)
-                .preferredColorScheme(.dark)
+            ContentView().environmentObject(appState).preferredColorScheme(.dark)
         }
     }
 }

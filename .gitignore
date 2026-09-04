@@ -43,3 +43,6 @@ xcuserdata/
 
 # Logs
 *.log
+
+# Installer
+/opt/bambu-pi-controller/

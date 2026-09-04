@@ -1,8 +1,4 @@
-//  WebSocketService.swift
-//  BambuController
-//
-//  WebSocket client for real-time printer updates
-
+// WebSocketService.swift - WebSocket client for real-time printer updates
 import Foundation
 import Combine
 
@@ -13,143 +9,89 @@ class WebSocketService: ObservableObject {
     @Published var isConnected = false
     @Published var lastError: String?
 
-    private var webSocketTask: URLSessionWebSocketTask?
+    private var task: URLSessionWebSocketTask?
     private let session = URLSession.shared
     private var reconnectTimer: Timer?
-    private let maxReconnectAttempts = 5
-    private var reconnectAttempts = 0
+    private var attempts = 0
+    private let maxAttempts = 5
 
-    // Callbacks
     var onStatusUpdate: ((PrinterStatus) -> Void)?
     var onEvent: ((WSMessage) -> Void)?
 
     private init() {}
 
     func connect() {
-        guard !isConnected else { return }
-        guard let url = URL(string: AppSettings.shared.wsURL) else {
-            lastError = "Ungültige WebSocket-URL"
-            return
-        }
-
-        webSocketTask = session.webSocketTask(with: url)
-        webSocketTask?.resume()
-        reconnectAttempts = 0
-
-        receiveMessage()
+        guard !isConnected, let url = URL(string: AppSettings.shared.wsURL) else { return }
+        task = session.webSocketTask(with: url)
+        task?.resume()
+        attempts = 0
+        receive()
     }
 
     func disconnect() {
-        reconnectTimer?.invalidate()
-        reconnectTimer = nil
-        webSocketTask?.cancel(with: .goingAway, reason: nil)
-        webSocketTask = nil
+        reconnectTimer?.invalidate(); reconnectTimer = nil
+        task?.cancel(with: .goingAway, reason: nil)
+        task = nil
         isConnected = false
     }
 
-    private func receiveMessage() {
-        webSocketTask?.receive { [weak self] result in
+    private func receive() {
+        task?.receive { [weak self] result in
             guard let self = self else { return }
-
             switch result {
-            case .success(let message):
-                self.handleMessage(message)
-                self.receiveMessage() // Continue listening
-
-            case .failure(let error):
-                Task { @MainActor in
-                    self.handleDisconnect(error: error)
-                }
+            case .success(let msg):
+                self.handle(msg)
+                self.receive()
+            case .failure(let err):
+                Task { @MainActor in self.handleDisconnect(err) }
             }
         }
     }
 
-    private func handleMessage(_ message: URLSessionWebSocketTask.Message) {
+    private func handle(_ message: URLSessionWebSocketTask.Message) {
+        let text: String
         switch message {
-        case .string(let text):
-            parseMessage(text)
-        case .data(let data):
-            if let text = String(data: data, encoding: .utf8) {
-                parseMessage(text)
-            }
-        @unknown default:
-            break
+        case .string(let s): text = s
+        case .data(let d): text = String(data: d, encoding: .utf8) ?? ""
+        @unknown default: return
+        }
+        guard let data = text.data(using: .utf8),
+              let ws = try? JSONDecoder().decode(WSMessage.self, from: data) else { return }
+
+        if ws.type == "status", let d = ws.data {
+            let status = parseStatus(d)
+            onStatusUpdate?(status)
+        } else if ws.type == "event" {
+            onEvent?(ws)
         }
     }
 
-    private func parseMessage(_ text: String) {
-        guard let data = text.data(using: .utf8) else { return }
-
-        do {
-            let wsMessage = try JSONDecoder().decode(WSMessage.self, from: data)
-
-            if wsMessage.type == "status", let wsData = wsMessage.data {
-                let status = parsePrinterStatus(wsData)
-                onStatusUpdate?(status)
-            } else if wsMessage.type == "event" {
-                onEvent?(wsMessage)
-            }
-        } catch {
-            print("Failed to parse WS message: \(error)")
-        }
-    }
-
-    private func parsePrinterStatus(_ data: WSData) -> PrinterStatus {
-        let state = PrinterState(rawValue: data.state ?? "unknown") ?? .unknown
-
-        let printJob = PrintJobInfo(
-            name: data.printJob?.name ?? "",
-            progress: data.printJob?.progress ?? 0,
-            currentLayer: data.printJob?.currentLayer ?? 0,
-            totalLayers: data.printJob?.totalLayers ?? 0,
-            elapsedTime: data.printJob?.elapsedTime ?? 0,
-            remainingTime: data.printJob?.remainingTime ?? 0,
-            filamentType: data.printJob?.filamentType ?? "",
-            filamentColor: data.printJob?.filamentColor ?? ""
+    private func parseStatus(_ d: WSData) -> PrinterStatus {
+        let state = PrinterState(rawValue: d.state ?? "unknown") ?? .unknown
+        let job = PrintJobInfo(
+            name: d.printJob?.name ?? "", progress: d.printJob?.progress ?? 0,
+            currentLayer: d.printJob?.currentLayer ?? 0, totalLayers: d.printJob?.totalLayers ?? 0,
+            elapsedTime: d.printJob?.elapsedTime ?? 0, remainingTime: d.printJob?.remainingTime ?? 0,
+            filamentType: d.printJob?.filamentType ?? "", filamentColor: d.printJob?.filamentColor ?? ""
         )
-
         return PrinterStatus(
-            state: state,
-            nozzleTemp: data.nozzleTemp ?? 0,
-            nozzleTargetTemp: data.nozzleTargetTemp ?? 0,
-            bedTemp: data.bedTemp ?? 0,
-            bedTargetTemp: data.bedTargetTemp ?? 0,
-            chamberTemp: data.chamberTemp ?? 0,
-            printJob: printJob,
-            wifiSignal: data.wifiSignal ?? 0,
-            errorCode: data.errorCode ?? 0,
-            fanSpeed: data.fanSpeed ?? 0,
-            printSpeed: data.printSpeed ?? 100,
-            flowRate: data.flowRate ?? 100
+            state: state, nozzleTemp: d.nozzleTemp ?? 0, nozzleTargetTemp: d.nozzleTargetTemp ?? 0,
+            bedTemp: d.bedTemp ?? 0, bedTargetTemp: d.bedTargetTemp ?? 0, chamberTemp: d.chamberTemp ?? 0,
+            printJob: job, wifiSignal: d.wifiSignal ?? 0, errorCode: d.errorCode ?? 0,
+            fanSpeed: d.fanSpeed ?? 0, printSpeed: d.printSpeed ?? 100, flowRate: d.flowRate ?? 100
         )
     }
 
-    private func handleDisconnect(error: Error) {
-        isConnected = false
-        lastError = error.localizedDescription
-
-        // Auto-reconnect with exponential backoff
-        if reconnectAttempts < maxReconnectAttempts {
-            reconnectAttempts += 1
-            let delay = min(pow(2.0, Double(reconnectAttempts)) * 1.0, 30.0)
-
-            reconnectTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
-                Task { @MainActor in
-                    self?.connect()
-                }
-            }
+    private func handleDisconnect(_ error: Error) {
+        isConnected = false; lastError = error.localizedDescription
+        guard attempts < maxAttempts else { return }
+        attempts += 1
+        let delay = min(pow(2.0, Double(attempts)), 30.0)
+        reconnectTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
+            Task { @MainActor in self?.connect() }
         }
     }
 
-    // Called when app becomes active
-    func handleAppActive() {
-        if !isConnected && AppSettings.shared.autoConnect {
-            connect()
-        }
-    }
-
-    // Called when app goes to background
-    func handleAppBackground() {
-        // Keep connection alive in background for a bit
-    }
+    func handleAppActive() { if !isConnected && AppSettings.shared.autoConnect { connect() } }
+    func handleAppBackground() {}
 }

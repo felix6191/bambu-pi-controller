@@ -1,5 +1,5 @@
 """System API routes."""
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 import psutil
 import platform
 
@@ -8,7 +8,6 @@ router = APIRouter()
 
 @router.get("/info")
 async def system_info():
-    """Get system information."""
     return {
         "hostname": platform.node(),
         "platform": platform.platform(),
@@ -30,7 +29,6 @@ async def system_info():
 
 @router.get("/network")
 async def network_info():
-    """Get network interface information."""
     interfaces = {}
     for name, addrs in psutil.net_if_addrs().items():
         interfaces[name] = [

@@ -1,8 +1,4 @@
-//  Models.swift
-//  BambuController
-//
-//  Data models for Bambu Lab printer status and API responses
-
+// Models.swift - Data models for Bambu Lab printer status and API responses
 import Foundation
 
 // MARK: - Printer Status
@@ -38,12 +34,7 @@ struct PrinterStatus: Codable {
 }
 
 enum PrinterState: String, Codable, CaseIterable {
-    case idle = "idle"
-    case printing = "printing"
-    case paused = "paused"
-    case busy = "busy"
-    case error = "error"
-    case unknown = "unknown"
+    case idle = "idle", printing = "printing", paused = "paused", busy = "busy", error = "error", unknown = "unknown"
 
     var displayName: String {
         switch self {
@@ -90,8 +81,7 @@ struct PrintJobInfo: Codable {
     let filamentColor: String
 
     enum CodingKeys: String, CodingKey {
-        case name
-        case progress
+        case name, progress
         case currentLayer = "current_layer"
         case totalLayers = "total_layers"
         case elapsedTime = "elapsed_time"
@@ -100,116 +90,60 @@ struct PrintJobInfo: Codable {
         case filamentColor = "filament_color"
     }
 
-    var formattedElapsed: String {
-        formatTime(elapsedTime)
-    }
-
-    var formattedRemaining: String {
-        formatTime(remainingTime)
-    }
+    var formattedElapsed: String { formatTime(elapsedTime) }
+    var formattedRemaining: String { formatTime(remainingTime) }
 
     private func formatTime(_ seconds: Int) -> String {
-        let hours = seconds / 3600
-        let minutes = (seconds % 3600) / 60
-        if hours > 0 {
-            return "\(hours)h \(minutes)m"
-        }
-        return "\(minutes)m"
+        let h = seconds / 3600, m = (seconds % 3600) / 60
+        return h > 0 ? "\(h)h \(m)m" : "\(m)m"
     }
 }
 
 // MARK: - API Request/Response Models
 
-struct TemperatureRequest: Codable {
-    let nozzle: Int?
-    let bed: Int?
-}
-
-struct SpeedRequest: Codable {
-    let speed: Int
-}
-
-struct FlowRequest: Codable {
-    let flow: Int
-}
-
+struct TemperatureRequest: Codable { let nozzle: Int?; let bed: Int? }
+struct SpeedRequest: Codable { let speed: Int }
+struct FlowRequest: Codable { let flow: Int }
 struct PrintStartRequest: Codable {
     let filename: String
     let bedTemp: Int
     let nozzleTemp: Int
-
-    enum CodingKeys: String, CodingKey {
-        case filename
-        case bedTemp = "bed_temp"
-        case nozzleTemp = "nozzle_temp"
-    }
+    enum CodingKeys: String, CodingKey { case filename; case bedTemp = "bed_temp"; case nozzleTemp = "nozzle_temp" }
 }
-
-struct APIResponse: Codable {
-    let success: Bool
-}
+struct APIResponse: Codable { let success: Bool }
 
 // MARK: - WebSocket Messages
 
-struct WSMessage: Codable {
-    let type: String
-    let data: WSData?
-
-    enum CodingKeys: String, CodingKey {
-        case type
-        case data
-    }
-}
-
+struct WSMessage: Codable { let type: String; let data: WSData? }
 struct WSData: Codable {
     let state: String?
-    let nozzleTemp: Double?
-    let nozzleTargetTemp: Double?
-    let bedTemp: Double?
-    let bedTargetTemp: Double?
+    let nozzleTemp: Double?; let nozzleTargetTemp: Double?
+    let bedTemp: Double?; let bedTargetTemp: Double?
     let chamberTemp: Double?
     let printJob: WSPrintJob?
-    let wifiSignal: Int?
-    let errorCode: Int?
-    let fanSpeed: Int?
-    let printSpeed: Int?
-    let flowRate: Int?
+    let wifiSignal: Int?; let errorCode: Int?
+    let fanSpeed: Int?; let printSpeed: Int?; let flowRate: Int?
 
     enum CodingKeys: String, CodingKey {
         case state
-        case nozzleTemp = "nozzle_temp"
-        case nozzleTargetTemp = "nozzle_target_temp"
-        case bedTemp = "bed_temp"
-        case bedTargetTemp = "bed_target_temp"
+        case nozzleTemp = "nozzle_temp"; case nozzleTargetTemp = "nozzle_target_temp"
+        case bedTemp = "bed_temp"; case bedTargetTemp = "bed_target_temp"
         case chamberTemp = "chamber_temp"
         case printJob = "print_job"
-        case wifiSignal = "wifi_signal"
-        case errorCode = "error_code"
-        case fanSpeed = "fan_speed"
-        case printSpeed = "print_speed"
-        case flowRate = "flow_rate"
+        case wifiSignal = "wifi_signal"; case errorCode = "error_code"
+        case fanSpeed = "fan_speed"; case printSpeed = "print_speed"; case flowRate = "flow_rate"
     }
 }
-
 struct WSPrintJob: Codable {
-    let name: String?
-    let progress: Double?
-    let currentLayer: Int?
-    let totalLayers: Int?
-    let elapsedTime: Int?
-    let remainingTime: Int?
-    let filamentType: String?
-    let filamentColor: String?
-
+    let name: String?; let progress: Double?
+    let currentLayer: Int?; let totalLayers: Int?
+    let elapsedTime: Int?; let remainingTime: Int?
+    let filamentType: String?; let filamentColor: String?
     enum CodingKeys: String, CodingKey {
-        case name
-        case progress
-        case currentLayer = "current_layer"
-        case totalLayers = "total_layers"
-        case elapsedTime = "elapsed_time"
-        case remainingTime = "remaining_time"
-        case filamentType = "filament_type"
-        case filamentColor = "filament_color"
+        case name, progress
+        case currentLayer = "current_layer"; case totalLayers = "total_layers"
+        case elapsedTime = "elapsed_time"; case remainingTime = "remaining_time"
+        case filamentType = "filament_type"; case filamentColor = "filament_color"
     }
 }
 
@@ -225,24 +159,12 @@ struct AppSettings: Codable {
 
     static func load() -> AppSettings {
         if let data = UserDefaults.standard.data(forKey: "AppSettings"),
-           let settings = try? JSONDecoder().decode(AppSettings.self, from: data) {
-            return settings
-        }
+           let s = try? JSONDecoder().decode(AppSettings.self, from: data) { return s }
         return AppSettings()
     }
 
-    func save() {
-        if let data = try? JSONEncoder().encode(self) {
-            UserDefaults.standard.set(data, forKey: "AppSettings")
-        }
-    }
+    func save() { if let d = try? JSONEncoder().encode(self) { UserDefaults.standard.set(d, forKey: "AppSettings") } }
 
-    var baseURL: String {
-        serverURL.hasSuffix("/") ? String(serverURL.dropLast()) : serverURL
-    }
-
-    var wsURL: String {
-        let url = baseURL.replacingOccurrences(of: "http", with: "ws")
-        return "\(url)/ws?token=\(apiToken)"
-    }
+    var baseURL: String { serverURL.hasSuffix("/") ? String(serverURL.dropLast()) : serverURL }
+    var wsURL: String { baseURL.replacingOccurrences(of: "http", with: "ws") + "/ws?token=\(apiToken)" }
 }

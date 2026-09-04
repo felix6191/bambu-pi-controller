@@ -10,7 +10,6 @@ router = APIRouter()
 
 @router.get("/stream")
 async def camera_stream():
-    """Proxy camera stream from printer."""
     if not settings.camera_url:
         raise HTTPException(status_code=404, detail="Camera not configured")
 
@@ -23,19 +22,14 @@ async def camera_stream():
                 async for chunk in response.aiter_bytes(8192):
                     yield chunk
 
-    return StreamingResponse(
-        stream_generator(),
-        media_type="multipart/x-mixed-replace; boundary=frame",
-    )
+    return StreamingResponse(stream_generator(), media_type="multipart/x-mixed-replace; boundary=frame")
 
 
 @router.get("/snapshot")
 async def camera_snapshot():
-    """Get single camera snapshot."""
     if not settings.camera_url:
         raise HTTPException(status_code=404, detail="Camera not configured")
 
-    # Try to get a single frame from MJPEG stream
     snapshot_url = settings.camera_url.replace("/stream", "/snapshot") if "/stream" in settings.camera_url else settings.camera_url
 
     async with httpx.AsyncClient(

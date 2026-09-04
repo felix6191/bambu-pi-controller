@@ -1,43 +1,21 @@
-//  AppState.swift
-//  BambuController
-//
-//  Global app state
-
+// AppState.swift - Global app state
 import Foundation
 import SwiftUI
 import Combine
 
 class AppState: ObservableObject {
     static let shared = AppState()
-
     @Published var isActive = false
     @Published var needsRefresh = false
-
-    private var cancellables = Set<AnyCancellable>()
+    private var bag = Set<AnyCancellable>()
 
     private init() {
-        // Observe app lifecycle
         NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)
-            .sink { [weak self] _ in
-                self?.handleAppActive()
-            }
-            .store(in: &cancellables)
-
+            .sink { [weak self] _ in self?.handleActive() }.store(in: &bag)
         NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)
-            .sink { [weak self] _ in
-                self?.handleAppBackground()
-            }
-            .store(in: &cancellables)
+            .sink { [weak self] _ in self?.handleBackground() }.store(in: &bag)
     }
 
-    private func handleAppActive() {
-        isActive = true
-        WebSocketService.shared.handleAppActive()
-        needsRefresh = true
-    }
-
-    private func handleAppBackground() {
-        isActive = false
-        WebSocketService.shared.handleAppBackground()
-    }
+    private func handleActive() { isActive = true; WebSocketService.shared.handleAppActive(); needsRefresh = true }
+    private func handleBackground() { isActive = false; WebSocketService.shared.handleAppBackground() }
 }
