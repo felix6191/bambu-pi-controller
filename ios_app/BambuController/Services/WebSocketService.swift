@@ -15,8 +15,8 @@ class WebSocketService: ObservableObject {
     private var attempts = 0
     private let maxAttempts = 5
 
-    var onStatusUpdate: ((PrinterStatus) -> Void)?
-    var onEvent: ((WSMessage) -> Void)?
+    var onStatusUpdate: (@MainActor (PrinterStatus) -> Void)?
+    var onEvent: (@MainActor (WSMessage) -> Void)?
 
     private init() {}
 
@@ -38,12 +38,14 @@ class WebSocketService: ObservableObject {
     private func receive() {
         task?.receive { [weak self] result in
             guard let self = self else { return }
-            switch result {
-            case .success(let msg):
-                self.handle(msg)
-                self.receive()
-            case .failure(let err):
-                Task { @MainActor in self.handleDisconnect(err) }
+            Task { @MainActor in
+                switch result {
+                case .success(let msg):
+                    self.handle(msg)
+                    self.receive()
+                case .failure(let err):
+                    self.handleDisconnect(err)
+                }
             }
         }
     }

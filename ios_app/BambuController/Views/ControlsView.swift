@@ -3,7 +3,10 @@ import SwiftUI
 
 struct ControlsView: View {
     @StateObject private var vm = PrinterViewModel.shared
-    @State private var nozzle = 200, bed = 60, speed = 100, flow = 100
+    @State private var nozzle = 200
+    @State private var bed = 60
+    @State private var speed = 100
+    @State private var flow = 100
 
     var body: some View {
         NavigationStack {
