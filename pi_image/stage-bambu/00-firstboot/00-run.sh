@@ -1,7 +1,7 @@
 #!/bin/bash -e
 # pi-gen Stage: Bambu Pi Controller ins Image einbetten.
 # Läuft auf dem Build-Host, ROOTFS_DIR zeigt aufs Ziel-Image.
-REPO_TARBALL="$(dirname "$0")/bambu-repo.tar.gz"
+REPO_TARBALL="$(dirname "$0")/../bambu-repo.tar.gz"
 install -d "${ROOTFS_DIR}/opt/bambu-pi-controller"
 tar -xzf "$REPO_TARBALL" -C "${ROOTFS_DIR}/opt/bambu-pi-controller"
 install -m 644 "${ROOTFS_DIR}/opt/bambu-pi-controller/pi_image/stage-bambu/00-firstboot/files/bambu-firstboot.service" \
