@@ -59,6 +59,17 @@ class APIService: ObservableObject {
     func setSpeed(_ speed: Int) async throws -> APIResponse {
         try await request("/printer/speed", method: "POST", body: try JSONEncoder().encode(SpeedRequest(speed: speed)), APIResponse.self)
     }
+    func setSpeedLevel(_ level: Int) async throws -> APIResponse {
+        struct L: Codable { let level: Int }
+        return try await request("/printer/speed-level", method: "POST", body: try JSONEncoder().encode(L(level: level)), APIResponse.self)
+    }
+    func setLight(on: Bool) async throws -> APIResponse {
+        struct L: Codable { let on: Bool }
+        return try await request("/printer/light", method: "POST", body: try JSONEncoder().encode(L(on: on)), APIResponse.self)
+    }
+    func getCapabilities() async throws -> Capabilities {
+        try await request("/printer/capabilities", Capabilities.self)
+    }
     func setFlow(_ flow: Int) async throws -> APIResponse {
         try await request("/printer/flow", method: "POST", body: try JSONEncoder().encode(FlowRequest(flow: flow)), APIResponse.self)
     }

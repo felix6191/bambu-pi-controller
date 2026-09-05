@@ -5,18 +5,24 @@ import SwiftUI
 // MARK: - Printer Status
 
 struct PrinterStatus: Codable {
-    let state: PrinterState
-    let nozzleTemp: Double
-    let nozzleTargetTemp: Double
-    let bedTemp: Double
-    let bedTargetTemp: Double
-    let chamberTemp: Double
-    let printJob: PrintJobInfo
-    let wifiSignal: Int
-    let errorCode: Int
-    let fanSpeed: Int
-    let printSpeed: Int
-    let flowRate: Int
+    var state: PrinterState
+    var nozzleTemp: Double
+    var nozzleTargetTemp: Double
+    var bedTemp: Double
+    var bedTargetTemp: Double
+    var chamberTemp: Double
+    var printJob: PrintJobInfo
+    var wifiSignal: Int
+    var errorCode: Int
+    var fanSpeed: Int
+    var auxFanSpeed: Int
+    var chamberFanSpeed: Int
+    var speedLevel: Int
+    var printSpeed: Int
+    var flowRate: Int
+    var nozzleDiameter: String
+    var sdcard: Bool
+    var chamberLight: String
 
     enum CodingKeys: String, CodingKey {
         case state
@@ -29,9 +35,89 @@ struct PrinterStatus: Codable {
         case wifiSignal = "wifi_signal"
         case errorCode = "error_code"
         case fanSpeed = "fan_speed"
+        case auxFanSpeed = "aux_fan_speed"
+        case chamberFanSpeed = "chamber_fan_speed"
+        case speedLevel = "speed_level"
         case printSpeed = "print_speed"
         case flowRate = "flow_rate"
+        case nozzleDiameter = "nozzle_diameter"
+        case sdcard
+        case chamberLight = "chamber_light"
     }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        state = try c.decodeIfPresent(PrinterState.self, forKey: .state) ?? .unknown
+        nozzleTemp = try c.decodeIfPresent(Double.self, forKey: .nozzleTemp) ?? 0
+        nozzleTargetTemp = try c.decodeIfPresent(Double.self, forKey: .nozzleTargetTemp) ?? 0
+        bedTemp = try c.decodeIfPresent(Double.self, forKey: .bedTemp) ?? 0
+        bedTargetTemp = try c.decodeIfPresent(Double.self, forKey: .bedTargetTemp) ?? 0
+        chamberTemp = try c.decodeIfPresent(Double.self, forKey: .chamberTemp) ?? 0
+        printJob = try c.decodeIfPresent(PrintJobInfo.self, forKey: .printJob) ?? PrintJobInfo(name: "", progress: 0, currentLayer: 0, totalLayers: 0, elapsedTime: 0, remainingTime: 0, filamentType: "", filamentColor: "")
+        wifiSignal = try c.decodeIfPresent(Int.self, forKey: .wifiSignal) ?? 0
+        errorCode = try c.decodeIfPresent(Int.self, forKey: .errorCode) ?? 0
+        fanSpeed = try c.decodeIfPresent(Int.self, forKey: .fanSpeed) ?? 0
+        auxFanSpeed = try c.decodeIfPresent(Int.self, forKey: .auxFanSpeed) ?? 0
+        chamberFanSpeed = try c.decodeIfPresent(Int.self, forKey: .chamberFanSpeed) ?? 0
+        speedLevel = try c.decodeIfPresent(Int.self, forKey: .speedLevel) ?? 2
+        printSpeed = try c.decodeIfPresent(Int.self, forKey: .printSpeed) ?? 100
+        flowRate = try c.decodeIfPresent(Int.self, forKey: .flowRate) ?? 100
+        nozzleDiameter = try c.decodeIfPresent(String.self, forKey: .nozzleDiameter) ?? "0.4"
+        sdcard = try c.decodeIfPresent(Bool.self, forKey: .sdcard) ?? true
+        chamberLight = try c.decodeIfPresent(String.self, forKey: .chamberLight) ?? "unknown"
+    }
+
+    init(state: PrinterState = .unknown,
+         nozzleTemp: Double = 0, nozzleTargetTemp: Double = 0,
+         bedTemp: Double = 0, bedTargetTemp: Double = 0, chamberTemp: Double = 0,
+         printJob: PrintJobInfo = PrintJobInfo(name: "", progress: 0, currentLayer: 0, totalLayers: 0, elapsedTime: 0, remainingTime: 0, filamentType: "", filamentColor: ""),
+         wifiSignal: Int = 0, errorCode: Int = 0,
+         fanSpeed: Int = 0, printSpeed: Int = 100, flowRate: Int = 100) {
+        self.state = state
+        self.nozzleTemp = nozzleTemp; self.nozzleTargetTemp = nozzleTargetTemp
+        self.bedTemp = bedTemp; self.bedTargetTemp = bedTargetTemp
+        self.chamberTemp = chamberTemp
+        self.printJob = printJob
+        self.wifiSignal = wifiSignal; self.errorCode = errorCode
+        self.fanSpeed = fanSpeed; self.auxFanSpeed = 0; self.chamberFanSpeed = 0
+        self.speedLevel = 2; self.printSpeed = printSpeed; self.flowRate = flowRate
+        self.nozzleDiameter = "0.4"; self.sdcard = true; self.chamberLight = "unknown"
+    }
+}
+
+/// Official Bambu speed presets (mirrors backend capabilities)
+struct SpeedPreset: Identifiable {
+    let id: Int
+    let name: String
+    let percent: Int
+    let blurb: String
+    static let all: [SpeedPreset] = [
+        SpeedPreset(id: 1, name: "Silent", percent: 50, blurb: "Leise, z. B. nachts"),
+        SpeedPreset(id: 2, name: "Standard", percent: 100, blurb: "Ausgewogen für den Alltag"),
+        SpeedPreset(id: 3, name: "Sport", percent: 124, blurb: "Schneller bei guter Qualität"),
+        SpeedPreset(id: 4, name: "Ludicrous", percent: 166, blurb: "Maximum — nur für robuste Teile"),
+    ]
+}
+
+struct Capabilities: Codable {
+    let model: String
+    let nozzleMaxTemp: Int
+    let bedMaxTemp: Int
+    let speedLevels: [SpeedLevelInfo]
+
+    enum CodingKeys: String, CodingKey {
+        case model
+        case nozzleMaxTemp = "nozzle_max_temp"
+        case bedMaxTemp = "bed_max_temp"
+        case speedLevels = "speed_levels"
+    }
+}
+
+struct SpeedLevelInfo: Codable, Identifiable {
+    var id: Int { level }
+    let level: Int
+    let name: String
+    let percent: Int
 }
 
 enum PrinterState: String, Codable, CaseIterable {
@@ -91,14 +177,14 @@ struct PrinterLimits: Codable, Equatable {
 }
 
 struct PrintJobInfo: Codable {
-    let name: String
-    let progress: Double
-    let currentLayer: Int
-    let totalLayers: Int
-    let elapsedTime: Int
-    let remainingTime: Int
-    let filamentType: String
-    let filamentColor: String
+    var name: String
+    var progress: Double
+    var currentLayer: Int
+    var totalLayers: Int
+    var elapsedTime: Int
+    var remainingTime: Int
+    var filamentType: String
+    var filamentColor: String
 
     enum CodingKeys: String, CodingKey {
         case name, progress
@@ -126,8 +212,8 @@ struct SpeedRequest: Codable { let speed: Int }
 struct FlowRequest: Codable { let flow: Int }
 struct PrintStartRequest: Codable {
     let filename: String
-    let bedTemp: Int
-    let nozzleTemp: Int
+    var bedTemp: Int
+    var nozzleTemp: Int
     enum CodingKeys: String, CodingKey { case filename; case bedTemp = "bed_temp"; case nozzleTemp = "nozzle_temp" }
 }
 struct APIResponse: Codable { let success: Bool }
@@ -137,12 +223,14 @@ struct APIResponse: Codable { let success: Bool }
 struct WSMessage: Codable { let type: String; let data: WSData? }
 struct WSData: Codable {
     let state: String?
-    let nozzleTemp: Double?; let nozzleTargetTemp: Double?
-    let bedTemp: Double?; let bedTargetTemp: Double?
-    let chamberTemp: Double?
-    let printJob: WSPrintJob?
-    let wifiSignal: Int?; let errorCode: Int?
-    let fanSpeed: Int?; let printSpeed: Int?; let flowRate: Int?
+    var nozzleTemp: Double?; let nozzleTargetTemp: Double?
+    var bedTemp: Double?; let bedTargetTemp: Double?
+    var chamberTemp: Double?
+    var printJob: WSPrintJob?
+    var wifiSignal: Int?; let errorCode: Int?
+    var fanSpeed: Int?; let auxFanSpeed: Int?; let chamberFanSpeed: Int?
+    var speedLevel: Int?; let printSpeed: Int?; let flowRate: Int?
+    var nozzleDiameter: String?; let sdcard: Bool?; let chamberLight: String?
 
     enum CodingKeys: String, CodingKey {
         case state
@@ -151,14 +239,28 @@ struct WSData: Codable {
         case chamberTemp = "chamber_temp"
         case printJob = "print_job"
         case wifiSignal = "wifi_signal"; case errorCode = "error_code"
-        case fanSpeed = "fan_speed"; case printSpeed = "print_speed"; case flowRate = "flow_rate"
+        case fanSpeed = "fan_speed"; case auxFanSpeed = "aux_fan_speed"; case chamberFanSpeed = "chamber_fan_speed"
+        case speedLevel = "speed_level"; case printSpeed = "print_speed"; case flowRate = "flow_rate"
+        case nozzleDiameter = "nozzle_diameter"; case sdcard; case chamberLight = "chamber_light"
+    }
+
+    /// Re-encode as backend JSON so the tolerant PrinterStatus decoder handles it.
+    func toStatus() -> PrinterStatus {
+        let enc = JSONEncoder()
+        guard let data = try? enc.encode(self),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let body = try? JSONSerialization.data(withJSONObject: obj),
+              let status = try? JSONDecoder().decode(PrinterStatus.self, from: body) else {
+            return PrinterStatus()
+        }
+        return status
     }
 }
 struct WSPrintJob: Codable {
     let name: String?; let progress: Double?
-    let currentLayer: Int?; let totalLayers: Int?
-    let elapsedTime: Int?; let remainingTime: Int?
-    let filamentType: String?; let filamentColor: String?
+    var currentLayer: Int?; let totalLayers: Int?
+    var elapsedTime: Int?; let remainingTime: Int?
+    var filamentType: String?; let filamentColor: String?
     enum CodingKeys: String, CodingKey {
         case name, progress
         case currentLayer = "current_layer"; case totalLayers = "total_layers"
@@ -174,6 +276,13 @@ struct AppSettings: Codable {
     var apiToken: String = ""
     var useTailscale: Bool = true
     var autoConnect: Bool = true
+    var onboarded: Bool = false
+    var demoMode: Bool = false
+    // Onboarding helpers (info only — the Pi holds the real printer config)
+    var printerIPHint: String = ""
+    var printerSerialHint: String = ""
+    var printerCodeHint: String = ""
+    var demoWanted: Bool = true
 
     static var shared = AppSettings.load()
 

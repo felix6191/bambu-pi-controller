@@ -12,7 +12,7 @@ struct ContentView: View {
             CameraView().tabItem { Label("Kamera", systemImage: "camera.fill") }
             SettingsView().tabItem { Label("Einstellungen", systemImage: "gearshape.fill") }
         }
-        .accentColor(.bambuBlue)
+        .tint(AppTheme.accent)
         .onAppear { Task { await vm.loadStatus() } }
     }
 }

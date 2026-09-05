@@ -17,7 +17,12 @@ struct DashboardView: View {
                 }.padding()
             }
             .navigationTitle("Bambu A1")
-            .toolbar { ToolbarItem(placement: .navigationBarTrailing) { ConnectionIndicator(connected: ws.isConnected && vm.status != nil) } }
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    if vm.isDemo { Pill(text: "DEMO", color: .purple) }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) { ConnectionIndicator(connected: vm.isDemo || (ws.isConnected && vm.status != nil)) }
+            }
             .refreshable { await vm.loadStatus() }
             .alert("Fehler", isPresented: $vm.showError, presenting: vm.errorMessage) { _ in Button("OK", role: .cancel) {} } message: { Text($0) }
         }
@@ -25,18 +30,6 @@ struct DashboardView: View {
 }
 
 // MARK: - Subviews
-
-private struct Card: ViewModifier {
-    func body(content: Content) -> some View {
-        content
-            .padding()
-            .background(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(Color(.secondarySystemGroupedBackground))
-                    .shadow(color: .black.opacity(0.25), radius: 8, x: 0, y: 4)
-            )
-    }
-}
 
 struct PrinterStatusCard: View {
     let status: PrinterStatus?

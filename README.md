@@ -156,8 +156,11 @@ bambu-pi-controller/
 | `/api/v1/printer/print/resume` | POST | Fortsetzen |
 | `/api/v1/printer/print/stop` | POST | Stopp |
 | `/api/v1/printer/temperature` | POST | Temps setzen |
-| `/api/v1/printer/speed` | POST | Speed setzen |
-| `/api/v1/printer/flow` | POST | Flow setzen |
+| `/api/v1/printer/speed` | POST | Speed setzen (%, wird auf 1–4 Presets gemappt) |
+| `/api/v1/printer/speed-level` | POST | Offizielles Speed-Preset (1=Silent, 2=Standard, 3=Sport, 4=Ludicrous) |
+| `/api/v1/printer/flow` | POST | Flow setzen (M221) |
+| `/api/v1/printer/light` | POST | Bauraumlicht an/aus |
+| `/api/v1/printer/capabilities` | GET | Offizielle A1-Limits (Düse 300 °C, Bett 100 °C, Speed-Presets) |
 | `/api/v1/camera/stream` | GET | MJPEG Stream |
 | `/api/v1/camera/snapshot` | GET | Einzelbild |
 

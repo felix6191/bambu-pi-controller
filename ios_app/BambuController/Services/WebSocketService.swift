@@ -87,21 +87,7 @@ class WebSocketService: ObservableObject {
         }
     }
 
-    private func parseStatus(_ d: WSData) -> PrinterStatus {
-        let state = PrinterState(rawValue: d.state ?? "unknown") ?? .unknown
-        let job = PrintJobInfo(
-            name: d.printJob?.name ?? "", progress: d.printJob?.progress ?? 0,
-            currentLayer: d.printJob?.currentLayer ?? 0, totalLayers: d.printJob?.totalLayers ?? 0,
-            elapsedTime: d.printJob?.elapsedTime ?? 0, remainingTime: d.printJob?.remainingTime ?? 0,
-            filamentType: d.printJob?.filamentType ?? "", filamentColor: d.printJob?.filamentColor ?? ""
-        )
-        return PrinterStatus(
-            state: state, nozzleTemp: d.nozzleTemp ?? 0, nozzleTargetTemp: d.nozzleTargetTemp ?? 0,
-            bedTemp: d.bedTemp ?? 0, bedTargetTemp: d.bedTargetTemp ?? 0, chamberTemp: d.chamberTemp ?? 0,
-            printJob: job, wifiSignal: d.wifiSignal ?? 0, errorCode: d.errorCode ?? 0,
-            fanSpeed: d.fanSpeed ?? 0, printSpeed: d.printSpeed ?? 100, flowRate: d.flowRate ?? 100
-        )
-    }
+    private func parseStatus(_ d: WSData) -> PrinterStatus { d.toStatus() }
 
     private func handleDisconnect(_ error: Error) {
         isConnected = false; lastError = error.localizedDescription

@@ -1,80 +1,139 @@
-// ControlsView.swift - Manual printer controls (limit-aware: values are clamped to printer caps before sending)
+// ControlsView.swift - Manual printer controls (limit-aware, official Bambu presets)
 import SwiftUI
 
 struct ControlsView: View {
     @ObservedObject private var vm = PrinterViewModel.shared
     @State private var nozzle = 200
     @State private var bed = 60
-    @State private var speed = 100
     @State private var flow = 100
+    @State private var lightOn: Bool?
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 20) {
-                    nozzleSection
-                    bedSection
-                    speedSection
-                    flowSection
-                    if let s = vm.status { FanSpeedView(speed: s.fanSpeed) }
-                    LimitHintCard(limits: vm.limits)
-                    Spacer(minLength: 100)
-                }.padding()
-            }
+            ScrollView { formContent }
             .navigationTitle("Steuerung")
-            .onChange(of: vm.status?.nozzleTargetTemp) { nozzle = vm.clampedNozzle(Int($0 ?? 0)) }
-            .onChange(of: vm.status?.bedTargetTemp) { bed = vm.clampedBed(Int($0 ?? 0)) }
-            .onChange(of: vm.status?.printSpeed) { speed = vm.clampedSpeed($0 ?? 100) }
-            .onChange(of: vm.status?.flowRate) { flow = vm.clampedFlow($0 ?? 100) }
         }
     }
 
+    private var formContent: some View {
+        VStack(spacing: 16) {
+            nozzleSection
+            bedSection
+            speedSection
+            flowSection
+            fanSection
+            lightSection
+            LimitHintCard(limits: vm.limits)
+            Spacer(minLength: 90)
+        }
+        .padding()
+        .onChange(of: vm.status?.nozzleTargetTemp) { _, v in nozzle = vm.clampedNozzle(Int(v ?? 0)) }
+        .onChange(of: vm.status?.bedTargetTemp) { _, v in bed = vm.clampedBed(Int(v ?? 0)) }
+        .onChange(of: vm.status?.flowRate) { _, v in flow = vm.clampedFlow(v ?? 100) }
+        .onChange(of: vm.status?.chamberLight) { _, v in lightOn = (v == "on") }
+    }
+
+    // MARK: - Sections
+
     private var nozzleSection: some View {
         TemperatureControlSection(
-            title: "Düse",
+            title: "Düse", subtitle: "Hotend · max. \(vm.limits.maxNozzleTemp) °C",
             current: vm.status?.nozzleTemp ?? 0,
             target: $nozzle,
             maxTemp: vm.limits.maxNozzleTemp,
             color: .orange,
+            presets: [0, 190, 210, 230, 250],
             onSet: { temp in Task { await vm.setNozzleTemperature(temp) } }
         )
     }
 
     private var bedSection: some View {
         TemperatureControlSection(
-            title: "Druckbett",
+            title: "Druckbett", subtitle: "Heatbed · max. \(vm.limits.maxBedTemp) °C",
             current: vm.status?.bedTemp ?? 0,
             target: $bed,
             maxTemp: vm.limits.maxBedTemp,
             color: .red,
+            presets: [0, 50, 60, 65, 80, 100],
             onSet: { temp in Task { await vm.setBedTemperature(temp) } }
         )
     }
 
     private var speedSection: some View {
-        SliderControlSection(
-            title: "Druckgeschwindigkeit",
-            value: $speed,
-            range: vm.limits.minSpeed...vm.limits.maxSpeed,
-            step: 5,
-            unit: "%",
-            current: vm.status?.printSpeed ?? 100,
-            color: .blue,
-            onSet: { spd in Task { await vm.setPrintSpeed(spd) } }
-        )
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Druckgeschwindigkeit").font(.headline)
+                    Text("Offizielle Bambu-Modi").font(.caption).foregroundColor(.secondary)
+                }
+                Spacer()
+                if let lvl = SpeedPreset.all.first(where: { $0.id == (vm.status?.speedLevel ?? 2) }) {
+                    Pill(text: "\(lvl.name) · \(lvl.percent) %", color: .blue)
+                }
+            }
+            ForEach(SpeedPreset.all) { preset in
+                SpeedRow(
+                    preset: preset,
+                    active: (vm.status?.speedLevel ?? 2) == preset.id
+                ) { Task { await vm.setSpeedLevel(preset.id) } }
+            }
+        }.card()
     }
 
     private var flowSection: some View {
         SliderControlSection(
-            title: "Flow Rate",
+            title: "Flow Rate", subtitle: "Materialfluss · 50–150 %",
             value: $flow,
             range: vm.limits.minFlow...vm.limits.maxFlow,
-            step: 5,
-            unit: "%",
+            step: 5, unit: "%",
             current: vm.status?.flowRate ?? 100,
             color: .purple,
             onSet: { flw in Task { await vm.setFlowRate(flw) } }
         )
+    }
+
+    private var fanSection: some View {
+        VStack(spacing: 10) {
+            HStack { Text("Lüfter").font(.headline); Spacer() }
+            FanRow(label: "Bauteil", speed: vm.status?.fanSpeed ?? 0, color: .blue)
+            FanRow(label: "Aux", speed: vm.status?.auxFanSpeed ?? 0, color: .cyan)
+        }.card()
+    }
+
+    private var lightSection: some View {
+        HStack {
+            Label("Bauraumlicht", systemImage: "lightbulb.fill")
+                .font(.headline)
+            Spacer()
+            Toggle("", isOn: Binding(
+                get: { lightOn ?? (vm.status?.chamberLight == "on") },
+                set: { v in lightOn = v; Task { await vm.setLight(on: v) } }
+            ))
+            .tint(AppTheme.accent)
+        }.card()
+    }
+}
+
+// MARK: - Rows & sections
+
+private struct SpeedRow: View {
+    let preset: SpeedPreset
+    let active: Bool
+    let tap: () -> Void
+    var body: some View {
+        Button(action: tap) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(preset.name).font(.body).fontWeight(active ? .semibold : .regular)
+                    Text("\(preset.percent) % · \(preset.blurb)").font(.caption).foregroundColor(.secondary)
+                }
+                Spacer()
+                if active { Image(systemName: "checkmark.circle.fill").foregroundColor(AppTheme.accent) }
+            }
+            .padding(10)
+            .background(active ? AppTheme.accent.opacity(0.12) : Color(.systemGray5).opacity(0.5))
+            .cornerRadius(10)
+        }.buttonStyle(.plain)
     }
 }
 
@@ -82,40 +141,36 @@ struct LimitHintCard: View {
     let limits: PrinterLimits
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: "shield.checkmark.fill").foregroundColor(.green)
-            Text("Limits aktiv: Düse max. \(limits.maxNozzleTemp)°, Bett max. \(limits.maxBedTemp)°, Speed \(limits.minSpeed)–\(limits.maxSpeed)%, Flow \(limits.minFlow)–\(limits.maxFlow)%. Höhere Werte werden automatisch gekappt.")
+            Image(systemName: "shield.checkmark.fill").foregroundColor(AppTheme.accent)
+            Text("Limits aktiv (Bambu Lab A1, offiziell): Düse max. \(limits.maxNozzleTemp) °C, Bett max. \(limits.maxBedTemp) °C. Höhere Werte werden automatisch gekappt.")
                 .font(.caption).foregroundColor(.secondary)
-        }
-        .padding()
-        .background(Color(.secondarySystemGroupedBackground))
-        .cornerRadius(16)
+        }.card()
     }
 }
 
 struct TemperatureControlSection: View {
     let title: String
+    var subtitle: String = ""
     let current: Double
     @Binding var target: Int
     let maxTemp: Int
     let color: Color
+    var presets: [Int] = []
     let onSet: (Int) -> Void
 
-    private var presets: [Int] { title == "Düse" ? [0,190,210,230,Swift.min(250, maxTemp)] : [0,50,60,70,80,Swift.min(100, maxTemp)] }
     private var clamped: Int { Swift.min(Swift.max(0, target), maxTemp) }
-    private var wasClamped: Bool { target != clamped }
 
     var body: some View {
         VStack(spacing: 12) {
             HStack {
-                Text(title).font(.headline)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.headline)
+                    if !subtitle.isEmpty { Text(subtitle).font(.caption).foregroundColor(.secondary) }
+                }
                 Spacer()
                 Text("\(Int(current))° / \(target)°")
-                    .font(.system(.body, design: .rounded))
-                    .fontWeight(.medium)
-                    .foregroundColor(color)
-                    .monospacedDigit()
+                    .font(.system(.body, design: .rounded)).fontWeight(.medium).foregroundColor(color).monospacedDigit()
             }
-            Text("Max. \(maxTemp)° (Druckerlimit)").font(.caption2).foregroundColor(.secondary).frame(maxWidth: .infinity, alignment: .leading)
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     RoundedRectangle(cornerRadius: 8).fill(Color(.systemGray5)).frame(height: 20)
@@ -130,27 +185,29 @@ struct TemperatureControlSection: View {
                 }
             }.frame(height: 20)
             Slider(value: Binding(get: { Double(target) }, set: { target = Swift.min(Swift.max(0, Int($0)), maxTemp) }), in: 0...Double(maxTemp), step: 1).tint(color)
-            if wasClamped {
-                Text("Auf Druckerlimit gekappt: \(clamped)°").font(.caption2).foregroundColor(.orange)
-            }
-            HStack(spacing: 8) {
-                ForEach(presets, id: \.self) { t in
-                    Button("\(t)°") { target = t; onSet(t) }
-                        .font(.caption)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(target == t ? color : Color(.systemGray5))
-                        .foregroundColor(target == t ? .white : .primary)
-                        .cornerRadius(8)
+            if !presets.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(presets.filter { $0 <= maxTemp }, id: \.self) { t in
+                            Button("\(t)°") { target = t; onSet(t) }
+                                .font(.caption)
+                                .padding(.horizontal, 12).padding(.vertical, 6)
+                                .background(target == t ? color : Color(.systemGray5))
+                                .foregroundColor(target == t ? .white : .primary)
+                                .cornerRadius(8)
+                        }
+                    }
                 }
-                Spacer()
             }
-        }.padding().background(Color(.secondarySystemGroupedBackground)).cornerRadius(16)
+            Button("Übernehmen") { onSet(clamped) }
+                .buttonStyle(PrimaryButtonStyle(color: color))
+        }.card()
     }
 }
 
 struct SliderControlSection: View {
     let title: String
+    var subtitle: String = ""
     @Binding var value: Int
     let range: ClosedRange<Int>
     let step: Int
@@ -162,7 +219,10 @@ struct SliderControlSection: View {
     var body: some View {
         VStack(spacing: 12) {
             HStack {
-                Text(title).font(.headline)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.headline)
+                    if !subtitle.isEmpty { Text(subtitle).font(.caption).foregroundColor(.secondary) }
+                }
                 Spacer()
                 Text("\(value)\(unit)").font(.system(.body, design: .rounded)).fontWeight(.bold).foregroundColor(color).monospacedDigit()
             }
@@ -174,18 +234,18 @@ struct SliderControlSection: View {
                 Spacer()
                 Text("\(range.upperBound)\(unit)").font(.caption).foregroundColor(.secondary)
             }
-            Button("Anwenden") { onSet(value) }.buttonStyle(.borderedProminent).tint(color).frame(maxWidth: .infinity)
-        }.padding().background(Color(.secondarySystemGroupedBackground)).cornerRadius(16)
+            Button("Anwenden") { onSet(value) }.buttonStyle(PrimaryButtonStyle(color: color))
+        }.card()
     }
 }
 
-struct FanSpeedView: View {
-    let speed: Int
+private struct FanRow: View {
+    let label: String; let speed: Int; let color: Color
     var body: some View {
-        VStack(spacing: 12) {
-            HStack { Text("Lüfter").font(.headline); Spacer(); Text("\(speed)%").font(.system(.body, design: .rounded)).fontWeight(.medium).monospacedDigit() }
-            HStack(spacing: 4) { ForEach(0..<10, id: \.self) { i in RoundedRectangle(cornerRadius: 2).fill(i < speed/10 ? Color.blue : Color(.systemGray5)).frame(height: 20).animation(.easeInOut(duration: 0.3), value: speed) } }
-        }.padding().background(Color(.secondarySystemGroupedBackground)).cornerRadius(16)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack { Text(label).font(.subheadline); Spacer(); Text("\(speed) %").font(.subheadline).monospacedDigit().foregroundColor(.secondary) }
+            HStack(spacing: 4) { ForEach(0..<10, id: \.self) { i in RoundedRectangle(cornerRadius: 2).fill(i < speed/10 ? color : Color(.systemGray5)).frame(height: 14).animation(.easeInOut(duration: 0.3), value: speed) } }
+        }
     }
 }
 
