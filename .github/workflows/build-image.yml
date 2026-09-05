@@ -13,6 +13,10 @@ jobs:
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v5
+      - name: Host-Emulation für armhf (qm-arm via Kernel-binfmt)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq qemu-user-static binfmt-support arch-test
       - name: Image bauen (pi-gen im Docker, alle Deps inklusive)
         run: |
           cd pi_image
