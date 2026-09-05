@@ -15,6 +15,8 @@ class FilesViewModel: ObservableObject {
 
     private let api = APIService.shared
     private var pollTask: Task<Void, Never>?
+    /// Jobs mit „Sofort drucken": sobald gesliced, automatisch starten.
+    private var autoPrint: Set<String> = []
 
     private init() {
         WebSocketService.shared.onJob = { [weak self] job in
@@ -29,6 +31,11 @@ class FilesViewModel: ObservableObject {
     private func upsert(_ job: SliceJob) {
         if let i = jobs.firstIndex(where: { $0.id == job.id }) { jobs[i] = job }
         else { jobs.insert(job, at: 0) }
+        // Sofort-Druck: Profil war vorausgewählt, User will nur noch drucken
+        if job.stage == .sliced && autoPrint.contains(job.id) {
+            autoPrint.remove(job.id)
+            Task { await self.print(job: job) }
+        }
     }
 
     func startPolling() {
@@ -65,8 +72,9 @@ class FilesViewModel: ObservableObject {
         } catch { fail(error) }
     }
 
-    func slice(job: SliceJob, params: SliceParams) async {
+    func slice(job: SliceJob, params: SliceParams, autoPrint: Bool = false) async {
         do {
+            if autoPrint { self.autoPrint.insert(job.id) }
             upsert(try await api.sliceJob(id: job.id, params: params))
         } catch { fail(error) }
     }

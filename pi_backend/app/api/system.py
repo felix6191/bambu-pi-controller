@@ -127,3 +127,53 @@ async def network_info():
             for addr in addrs
         ]
     return {"interfaces": interfaces}
+
+
+def _local_prefix() -> str:
+    """Eigenes /24 bestimmen (UDP-Trick, kein Traffic). Fallback Heimnetz."""
+    import socket as _s
+    try:
+        sk = _s.socket(_s.AF_INET, _s.SOCK_DGRAM)
+        sk.connect(("8.8.8.8", 80))
+        ip = sk.getsockname()[0]
+        sk.close()
+        return ".".join(ip.split(".")[:3])
+    except Exception:
+        return "192.168.1"
+
+
+@router.post("/printer-scan")
+async def printer_scan():
+    """Pi sucht den A1 selbst im Heimnetz (Port 8883 anpingen).
+
+    Zuverlässig begrenzt: genau ein /24, 128 parallel, 1 s Timeout.
+    Ergebnis: Kandidaten mit IP — Auswahl per Tap, kein Abtippen.
+    """
+    import asyncio as _aio
+    prefix = _local_prefix()
+
+    async def probe(i: int) -> dict | None:
+        ip = f"{prefix}.{i}"
+        t0 = _aio.get_running_loop().time()
+        try:
+            conn = _aio.open_connection(ip, 8883)
+            reader, writer = await _aio.wait_for(conn, timeout=1.0)
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except Exception:
+                pass
+            ms = int((_aio.get_running_loop().time() - t0) * 1000)
+            return {"ip": ip, "ms": ms}
+        except Exception:
+            return None
+
+    sem = _aio.Semaphore(128)
+
+    async def guarded(i: int) -> dict | None:
+        async with sem:
+            return await probe(i)
+
+    found = [r for r in await _aio.gather(*[guarded(i) for i in range(1, 255)]) if r]
+    found.sort(key=lambda r: r["ms"])
+    return {"prefix": f"{prefix}.0/24", "candidates": found}

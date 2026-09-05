@@ -1,6 +1,7 @@
 {
-  "_note": "Community startpunt temperatures for Bambu Lab A1 (official bed max 100C, nozzle max 300C). Used by the slice worker to render start G-code. Tune to your spool.",
-  "pla":  { "name": "PLA",  "nozzle": 220, "bed": 65, "fan_percent": 100, "note": "PLA/PLA Basic/Silk/Matte" },
-  "petg": { "name": "PETG", "nozzle": 250, "bed": 70, "fan_percent": 60,  "note": "PETG / PETG-HF, dry spool recommended" },
-  "tpu":  { "name": "TPU",  "nozzle": 215, "bed": 60, "fan_percent": 80,  "note": "TPU 95A, print slow, direct drive" }
+  "_note": "Community-Startwerte für Bambu Lab A1, 0.4 Edelstahl-Düse (Orca/Prusa-Foren, Bambu-Wiki). Start, kein Ersatz fürs Kalibrieren je Spule. Offene Bauweise: ASA nur kleine Teile.",
+  "pla":  { "name": "PLA",  "nozzle": 215, "bed": 60, "fan_percent": 100, "retract_mm": 0.8, "retract_speed": 30, "note": "Alltag: Deko & Prototypen. Matte/Silk/Plus laufen damit." },
+  "petg": { "name": "PETG", "nozzle": 240, "bed": 75, "fan_percent": 40,  "retract_mm": 1.0, "retract_speed": 30, "note": "Robust & wetterfest. Spule trocknen, Klebestift aufs Bett, Brim an." },
+  "tpu":  { "name": "TPU 95A", "nozzle": 228, "bed": 40, "fan_percent": 60, "retract_mm": 0.5, "retract_speed": 20, "note": "Flexibel. Externe Spule (nicht AMS), langsam drucken." },
+  "asa":  { "name": "ASA",  "nozzle": 260, "bed": 90, "fan_percent": 20,  "retract_mm": 0.8, "retract_speed": 30, "note": "UV-/hitzebeständig, aber: nur kleine Teile (offener Rahmen), Brim, zugfrei." }
 }

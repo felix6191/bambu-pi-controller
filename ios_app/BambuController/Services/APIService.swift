@@ -1,6 +1,7 @@
 // APIService.swift - REST API client for Bambu Pi Controller
 import Foundation
 import Combine
+import UIKit
 
 @MainActor
 class APIService: ObservableObject {
@@ -89,6 +90,37 @@ class APIService: ObservableObject {
             PrinterConfigResult.self)
     }
 
+    // Pairing ohne Tippen: Status/Claim gehen an eine BELIEBIGE Pi-URL (ohne Token)
+    func pairingStatus(baseURL: String) async throws -> PairingStatus {
+        let base = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
+        guard let url = URL(string: "\(base)/api/v1/pairing/status") else { throw APIError.invalidURL }
+        let (data, _) = try await session.data(from: url)
+        return try JSONDecoder().decode(PairingStatus.self, from: data)
+    }
+    func claimPi(baseURL: String) async throws -> PairingClaim {
+        let base = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
+        guard let url = URL(string: "\(base)/api/v1/pairing/claim") else { throw APIError.invalidURL }
+        var req = URLRequest(url: url, timeoutInterval: 15)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONEncoder().encode(["device_name": UIDevice.current.name])
+        let (data, resp) = try await session.data(for: req)
+        guard let http = resp as? HTTPURLResponse else { throw APIError.invalidResponse }
+        if http.statusCode == 403 { throw APIError.httpError(403, data) }
+        guard 200...299 ~= http.statusCode else { throw APIError.httpError(http.statusCode, data) }
+        return try JSONDecoder().decode(PairingClaim.self, from: data)
+    }
+
+    // Pi sucht den Drucker im Heimnetz (nach Pairing, mit Token)
+    func scanPrinters() async throws -> PrinterScanResult {
+        try await request("/system/printer-scan", method: "POST", PrinterScanResult.self)
+    }
+
+    // Repair: Pi für ein neues Handy freigeben (Druckerconfig bleibt)
+    func resetPairing() async throws -> APIResponse {
+        try await request("/pairing/reset", method: "POST", APIResponse.self)
+    }
+
     // Files: STL upload (multipart) + jobs
     func uploadFile(data: Data, filename: String) async throws -> SliceJob {
         guard !baseURL.isEmpty, let url = URL(string: "\(baseURL)/api/v1/files/upload") else { throw APIError.invalidURL }
@@ -131,6 +163,23 @@ class APIService: ObservableObject {
         struct R: Codable { let success: Bool }
         let r: R = try await request("/files/jobs/\(id)", method: "DELETE", R.self)
         return APIResponse(success: r.success, verified: nil, via: nil)
+    }
+
+    // Original-Modell für die 3D-Vorschau (GET /files/uploads/{id})
+    func downloadUpload(jobId: String) async throws -> Data {
+        guard !baseURL.isEmpty, let url = URL(string: "\(baseURL)/api/v1/files/uploads/\(jobId)") else { throw APIError.invalidURL }
+        var req = URLRequest(url: url, timeoutInterval: 120)
+        req.httpMethod = "GET"
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let (data, resp): (Data, URLResponse)
+        do { (data, resp) = try await session.data(for: req) }
+        catch let e as URLError where e.code == .timedOut { throw APIError.timeout }
+        catch { throw APIError.network(error) }
+        guard let http = resp as? HTTPURLResponse else { throw APIError.invalidResponse }
+        if http.statusCode == 401 { throw APIError.unauthorized }
+        if http.statusCode == 404 { throw APIError.httpError(404, data) }
+        guard 200...299 ~= http.statusCode else { throw APIError.httpError(http.statusCode, data) }
+        return data
     }
 
     func getProfiles() async throws -> ProfilesResponse {

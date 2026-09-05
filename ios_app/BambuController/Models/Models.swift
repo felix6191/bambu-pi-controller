@@ -188,6 +188,21 @@ struct SliceParams: Codable {
     var quality: String = "standard"
     var supports: Bool = false
     var infill: Int = 15
+    // Erweitert (nil = Profilwert, Desktop-Niveau)
+    var layerHeight: Double?
+    var walls: Int?
+    var brim: Bool?
+    var nozzleTemp: Int?
+    var bedTemp: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case filament, quality, supports, infill
+        case layerHeight = "layer_height"
+        case walls
+        case brim
+        case nozzleTemp = "nozzle_temp"
+        case bedTemp = "bed_temp"
+    }
 }
 
 struct FilamentInfo: Codable {
@@ -342,6 +357,41 @@ struct PrinterConfigResult: Codable {
         case printerConnected = "printer_connected"
         case message
     }
+}
+
+// MARK: - Pairing (kein Tippen) + Drucker-Suche
+
+struct PairingStatus: Codable {
+    let paired: Bool
+    let piId: String
+    let version: Int
+
+    enum CodingKeys: String, CodingKey {
+        case paired
+        case piId = "pi_id"
+        case version
+    }
+}
+
+struct PairingClaim: Codable {
+    let apiToken: String
+    let piId: String
+
+    enum CodingKeys: String, CodingKey {
+        case apiToken = "api_token"
+        case piId = "pi_id"
+    }
+}
+
+struct PrinterCandidate: Codable, Identifiable {
+    var id: String { ip }
+    let ip: String
+    let ms: Int
+}
+
+struct PrinterScanResult: Codable {
+    let prefix: String
+    let candidates: [PrinterCandidate]
 }
 
 // MARK: - WebSocket Messages

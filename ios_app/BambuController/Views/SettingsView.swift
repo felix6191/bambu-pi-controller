@@ -8,6 +8,9 @@ struct SettingsView: View {
     @State private var testing = false
     @State private var showOnboarding = false
     @State private var showResetConfirm = false
+    @State private var showPiSearch = false
+    @State private var repairResult: String?
+    @State private var repairing = false
     @ObservedObject private var vm = PrinterViewModel.shared
 
     var body: some View {
@@ -26,6 +29,17 @@ struct SettingsView: View {
                 } header: { Text("Status") }
 
                 Section {
+                    Button { showPiSearch = true } label: {
+                        HStack {
+                            Image(systemName: "antenna.radiowaves.left.and.right")
+                                .foregroundColor(AppTheme.accent)
+                            Text("Pi automatisch suchen & verbinden")
+                                .foregroundColor(.primary)
+                            Spacer()
+                            Image(systemName: "chevron.right").foregroundColor(.secondary)
+                        }
+                    }
+                    .sheet(isPresented: $showPiSearch) { PiSearchSheet() }
                     TextField("http://100.x.x.x:8000", text: $settings.serverURL)
                         .textFieldStyle(.roundedBorder)
                         .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
@@ -51,7 +65,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Server (Raspberry Pi)")
                 } footer: {
-                    HintText(text: "Zuhause: Heimnetz-IP des Pi. Unterwegs: Tailscale-IP (100.x.x.x). Der Token steht am Ende der Pi-Installation bzw. in /opt/bambu-pi-controller/pi_backend/.env.")
+                    HintText(text: "Normalfall: oben auf „Pi automatisch suchen“ — nichts abtippen. Manuell nur für Profis (Tailscale-IP 100.x.x.x von unterwegs).")
                 }
 
                 Section {
@@ -62,6 +76,16 @@ struct SettingsView: View {
                     .disabled(settings.serverURL.isEmpty || settings.apiToken.isEmpty || testing || vm.isDemo)
                     if let r = testResult {
                         Text(r).font(.footnote).foregroundColor(r.hasPrefix("✅") ? .green : .red)
+                    }
+                    Button {
+                        Task { await repair() }
+                    } label: {
+                        if repairing { ProgressView().frame(maxWidth: .infinity) }
+                        else { Text("Pi für neues Handy freigeben").frame(maxWidth: .infinity) }
+                    }
+                    .disabled(settings.serverURL.isEmpty || settings.apiToken.isEmpty || repairing || vm.isDemo)
+                    if let r = repairResult {
+                        Text(r).font(.footnote).foregroundColor(.secondary)
                     }
                 }
 
@@ -161,6 +185,17 @@ struct SettingsView: View {
         settings = AppSettings.shared
         testResult = "Zurückgesetzt. Bitte Setup erneut durchlaufen."
     }
+
+    private func repair() async {
+        repairing = true; repairResult = nil
+        defer { repairing = false }
+        do {
+            _ = try await APIService.shared.resetPairing()
+            repairResult = "Pi freigegeben — neues Handy kann sich jetzt per Suche verbinden."
+        } catch {
+            repairResult = "Fehler: \(error.localizedDescription)"
+        }
+    }
 }
 
 private struct LabeledValue: View {
@@ -182,8 +217,91 @@ private struct ReOnboardingHost: View {
     @Environment(\.dismiss) var dismiss
     @State private var done = false
     var body: some View {
-        OnboardingView(finished: $done)
+        SetupFlowView(finished: $done)
             .onChange(of: done) { _, v in if v { dismiss() } }
+    }
+}
+
+/// Automatische Pi-Suche (Bonjour) + Verbinden per Tap — ohne Tippen.
+private struct PiSearchSheet: View {
+    @Environment(\.dismiss) var dismiss
+    @StateObject private var discovery = PiDiscovery.shared
+    @State private var pairing = false
+    @State private var message: String?
+    @State private var ok = false
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    if discovery.pis.isEmpty {
+                        HStack { Spacer()
+                            VStack(spacing: 8) {
+                                if discovery.searching { ProgressView("Suche läuft …") }
+                                else { Text("Nichts gefunden.").foregroundColor(.secondary) }
+                                Button("Erneut suchen") { discovery.start() }.buttonStyle(.bordered)
+                            }
+                            Spacer()
+                        }
+                        .padding(.vertical, 16)
+                    } else {
+                        ForEach(discovery.pis) { pi in
+                            Button { Task { await pair(pi) } } label: {
+                                HStack {
+                                    Image(systemName: "server.rack").foregroundColor(AppTheme.accent)
+                                    VStack(alignment: .leading) {
+                                        Text(pi.name).foregroundColor(.primary)
+                                        Text(pi.paired ? "Bereits vergeben" : "Bereit — antippen")
+                                            .font(.caption).foregroundColor(.secondary)
+                                    }
+                                    Spacer()
+                                    if pairing { ProgressView() }
+                                }
+                            }
+                            .disabled(pairing)
+                        }
+                    }
+                } header: { Text("Gefundene Pis") }
+                .headerProminence(.increased)
+                if let m = message {
+                    Section { Text(m).font(.footnote).foregroundColor(ok ? .green : .red) }
+                }
+                Section {
+                    HintText(text: "Gleiches WLAN wie der Pi (kein Gast-WLAN). UnPaired-Pis lassen sich per Tap verbinden — Token kommt automatisch.")
+                }
+            }
+            .navigationTitle("Pi suchen")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) { Button("Fertig") { dismiss() } }
+            }
+        }
+        .onAppear { discovery.start() }
+        .onDisappear { discovery.stop() }
+    }
+
+    private func pair(_ pi: DiscoveredPi) async {
+        pairing = true; message = nil; ok = false
+        defer { pairing = false }
+        for attempt in 1...3 {
+            do {
+                let claim = try await APIService.shared.claimPi(baseURL: pi.baseURL)
+                var s = AppSettings.shared
+                s.serverURL = pi.baseURL; s.apiToken = claim.apiToken
+                s.demoWanted = false; s.commit()
+                PrinterViewModel.shared.disableDemo()
+                await PrinterViewModel.shared.loadStatus()
+                message = "✅ Verbunden mit \(pi.name)."; ok = true
+                return
+            } catch {
+                if let e = error as? APIError, case .httpError(403, _) = e {
+                    message = "Dieser Pi gehört schon zu einem Handy — erst freigeben (unten in den Einstellungen oder „sudo bambu repair“)."
+                    return
+                }
+                if attempt < 3 { try? await Task.sleep(nanoseconds: 1_500_000_000) }
+                else { message = "Klappt gerade nicht: \(error.localizedDescription)" }
+            }
+        }
     }
 }
 

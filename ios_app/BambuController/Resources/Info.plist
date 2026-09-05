@@ -31,6 +31,10 @@
 	<string>Für Kamerabild des 3D-Druckers</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Für Verbindung zum lokalen Raspberry Pi Server</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_bambu-pi._tcp</string>
+	</array>
 	<key>UIAppFonts</key>
 	<array>
 		<string>SpaceGrotesk.ttf</string>

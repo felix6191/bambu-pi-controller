@@ -9,6 +9,8 @@ Report envelope:   {"<type>": {"sequence_id": "<n>", "command": "<cmd>",
                                "result": "success", ...}}
 Unsolicited status pushes carry no matching sequence_id.
 """
+from __future__ import annotations
+
 import json
 import time
 from enum import Enum

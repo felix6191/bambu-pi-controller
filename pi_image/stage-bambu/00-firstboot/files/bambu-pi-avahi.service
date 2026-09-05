@@ -1,0 +1,12 @@
+<?xml version="1.0" standalone='no'?>
+<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+<!-- Das „Ausgangssignal": Die App findet den Pi ohne IP-Eingabe darüber. -->
+<service-group>
+  <name replace-wildcards="yes">Bambu-Pi on %h</name>
+  <service>
+    <type>_bambu-pi._tcp</type>
+    <port>8000</port>
+    <txt-record>ver=1</txt-record>
+    <txt-record>app=BambuController</txt-record>
+  </service>
+</service-group>

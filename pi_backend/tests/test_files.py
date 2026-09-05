@@ -28,8 +28,8 @@ class TestProfiles:
     def test_ini_files_exist(self):
         root = Path(__file__).resolve().parents[1] / "profiles"
         for name in ("machine_a1.ini", "filament_pla.ini", "filament_petg.ini",
-                     "filament_tpu.ini", "process_draft.ini", "process_standard.ini",
-                     "process_fine.ini"):
+                      "filament_tpu.ini", "filament_asa.ini", "process_draft.ini",
+                      "process_standard.ini", "process_fine.ini"):
             assert (root / name).exists(), f"missing {name}"
         machine = (root / "machine_a1.ini").read_text(encoding="utf-8")
         assert "{{NOZZLE}}" in machine and "{{BED}}" in machine

@@ -37,8 +37,14 @@ case "$cmd" in
   reconfigure)
     exec bash "$INSTALL_DIR/install.sh" --configure
     ;;
+  repair)
+    echo "Gebe Pi für ein neues Handy frei (Druckerdaten bleiben)…"
+    TOKEN=$(grep "^API_TOKEN=" "$INSTALL_DIR/pi_backend/.env" 2>/dev/null | cut -d= -f2)
+    if [[ -z "$TOKEN" ]]; then echo "Kein Token gefunden — erst install.sh laufen lassen."; exit 1; fi
+    curl -sf -X POST -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/v1/pairing/reset && echo "Bereit — in der App erneut verbinden."
+    ;;
   *)
-    echo "Benutzung: sudo bambu {status|iphone|logs|restart|update|reconfigure}"
+    echo "Benutzung: sudo bambu {status|iphone|logs|restart|update|reconfigure|repair}"
     echo "  status      Zeigt Container, Gesundheit und Adressen"
     echo "  iphone      Zeigt Server-URL + Token für die iPhone-App"
     echo "  logs        Live-Protokoll des Servers"

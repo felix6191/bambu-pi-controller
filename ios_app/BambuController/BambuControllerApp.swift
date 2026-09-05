@@ -8,11 +8,11 @@ struct BambuControllerApp: App {
 
     var body: some Scene {
         WindowGroup {
-            if onboarded {
+            if onboarded && !needsSetup {
                 ContentView()
                     .environmentObject(appState)
             } else {
-                OnboardingView(finished: $onboarded)
+                SetupFlowView(finished: $onboarded)
                     .onChange(of: onboarded) { _, v in
                         guard v else { return }
                         // After onboarding, boot the live/demo connection once
@@ -27,5 +27,12 @@ struct BambuControllerApp: App {
                     }
             }
         }
+    }
+
+    /// Bestandskunden mit leerer Config (altes Onboarding) sehen den neuen
+    /// Auto-Flow statt eines leeren Dashboards mit Tippfeldern.
+    private var needsSetup: Bool {
+        let s = AppSettings.shared
+        return !s.demoMode && (s.serverURL.isEmpty || s.apiToken.isEmpty)
     }
 }

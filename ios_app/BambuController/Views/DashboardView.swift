@@ -12,7 +12,7 @@ struct DashboardView: View {
                 VStack(spacing: 16) {
                     if let fb = vm.feedback { FeedbackBanner(feedback: fb) }
                     headerRow
-                    PrinterDiagramView(status: vm.status).card()
+                    PrinterDiagramView(status: vm.status)
                     TempChartCard(history: vm.tempHistory)
                     statGrid
                     if let s = vm.status, s.state == .printing || s.state == .paused {
@@ -29,36 +29,19 @@ struct DashboardView: View {
         }
     }
 
-    // MARK: - Header (avatar + name left, live + light right)
+    // MARK: - Header (nur das Wichtigste: Name, Status, WLAN)
 
     private var headerRow: some View {
         HStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(Color(.secondarySystemGroupedBackground))
-                    .frame(width: 52, height: 52)
-                    .shadow(color: .black.opacity(0.12), radius: 6, x: 0, y: 3)
-                Image(systemName: "printer.fill")
-                    .font(.title2)
-                    .foregroundColor(.primary)
-                    .symbolEffect(.bounce, value: vm.status?.state)
-            }
-            .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Bambu Lab A1")
-                    .font(.brand(21, weight: .bold))
+                    .font(.system(.title2, design: .default)).fontWeight(.semibold)
                 Text(vm.status?.state.displayName ?? "Verbinde …")
                     .font(.subheadline).foregroundColor(.secondary)
             }
             Spacer()
-            VStack(alignment: .trailing, spacing: 6) {
-                HStack(spacing: 6) {
-                    if vm.isDemo { Pill(text: "Demo", color: .purple) }
-                    LivePill(live: vm.isDemo || (ws.isConnected && vm.status != nil))
-                }
-                if let s = vm.status {
-                    WifiSignalView(signal: s.wifiSignal)
-                }
+            if let s = vm.status {
+                WifiSignalView(signal: s.wifiSignal)
             }
         }
         .accessibilityElement(children: .combine)

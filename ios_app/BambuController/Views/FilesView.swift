@@ -45,8 +45,8 @@ struct FilesView: View {
                 }
             }
             .sheet(item: $profileJob) { job in
-                ProfileSheet(job: job) { params in
-                    Task { await vm.slice(job: job, params: params) }
+                ProfileSheet(job: job) { params, auto in
+                    Task { await vm.slice(job: job, params: params, autoPrint: auto) }
                 }
             }
             .alert("Fehler", isPresented: $vm.showError, presenting: vm.errorMessage) { _ in
@@ -109,6 +109,11 @@ private struct JobCard: View {
     let onDelete: () -> Void
     @State private var confirmDelete = false
     @State private var confirmPrint = false
+    @State private var showPreview = false
+
+    private var canPreview: Bool {
+        ["stl", "obj", "3mf", "step"].contains((job.filename as NSString).pathExtension.lowercased())
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -139,6 +144,10 @@ private struct JobCard: View {
                 Text("G-Code: \(job.gcodeName)").font(.caption2).foregroundColor(.secondary).monospaced()
             }
             HStack(spacing: 10) {
+                if canPreview {
+                    Button("3D-Vorschau") { showPreview = true }
+                        .buttonStyle(.bordered)
+                }
                 if job.stage == .uploaded || job.stage == .sliced || job.stage == .failed {
                     Button("Slicen…") { onSlice() }
                         .buttonStyle(.bordered).tint(AppTheme.accent)
@@ -151,6 +160,7 @@ private struct JobCard: View {
             }
         }
         .padding().card()
+        .sheet(isPresented: $showPreview) { STLPreviewSheet(job: job) }
         .confirmationDialog("Wirklich drucken?", isPresented: $confirmPrint, titleVisibility: .visible) {
             Button("Druck starten") { onPrint() }
             Button("Abbrechen", role: .cancel) {}
@@ -175,10 +185,24 @@ private struct JobCard: View {
 
 private struct ProfileSheet: View {
     let job: SliceJob
-    let onSlice: (SliceParams) -> Void
+    let onSlice: (SliceParams, Bool) -> Void
     @Environment(\.dismiss) var dismiss
     @ObservedObject private var files = FilesViewModel.shared
+    // Vorauswahl: PLA + Standard (häufigster Fall) — nur noch Drucken tippen.
     @State private var params = SliceParams()
+    @State private var autoPrint = true
+    @State private var showAdvanced = false
+    @State private var advLayer: Double?
+    @State private var advWalls: Int?
+    @State private var advBrim: Bool?
+    @State private var advNozzle: Double?
+    @State private var advBed: Double?
+
+    private var profileLayer: Double {
+        ["draft": 0.28, "fine": 0.12][params.quality] ?? 0.20
+    }
+    private var profileNozzle: Int { filamentOptions.first(where: { $0.key == params.filament })?.value.nozzle ?? 215 }
+    private var profileBed: Int { filamentOptions.first(where: { $0.key == params.filament })?.value.bed ?? 60 }
 
     var body: some View {
         NavigationStack {
@@ -201,7 +225,7 @@ private struct ProfileSheet: View {
                         }
                     }
                 }
-                Section("Optionen") {
+                Section {
                     Toggle("Stützstruktur", isOn: $params.supports)
                     HStack {
                         Text("Infill")
@@ -209,12 +233,81 @@ private struct ProfileSheet: View {
                         Text("\(params.infill) %").monospacedDigit().foregroundColor(.secondary)
                     }
                     Slider(value: Binding(get: { Double(params.infill) }, set: { params.infill = Int($0) }), in: 0...100, step: 5)
+                    Toggle("Sofort drucken", isOn: $autoPrint)
+                } header: {
+                    Text("Optionen")
+                } footer: {
+                    HintText(text: "An: Nach dem Slicen startet der Druck von allein. Aus: Erst 3D-Vorschau prüfen, dann selbst auf Drucken tippen.")
                 }
                 Section {
-                    Button("Slicen starten") { onSlice(params); dismiss() }
-                        .buttonStyle(PrimaryButtonStyle())
+                    DisclosureGroup("Anpassen (optional)", isExpanded: $showAdvanced) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text("Schichthöhe")
+                                Spacer()
+                                Text(advLayer.map { String(format: "%.2f mm", $0) } ?? "Profil (\(String(format: "%.2f", profileLayer)) mm)")
+                                    .font(.caption).foregroundColor(.secondary).monospacedDigit()
+                            }
+                            Slider(value: Binding(get: { advLayer ?? profileLayer }, set: { advLayer = $0 }), in: 0.08...0.28, step: 0.04)
+                        }
+                        HStack {
+                            Text("Wände")
+                            Spacer()
+                            Stepper(value: Binding(get: { advWalls ?? 2 }, set: { advWalls = $0 }), in: 1...5) {
+                                Text(advWalls.map { "\($0)" } ?? "Profil (2)")
+                                    .font(.caption).foregroundColor(.secondary).monospacedDigit()
+                            }
+                        }
+                        HStack {
+                            Text("Brim")
+                            Spacer()
+                            Picker("Brim", selection: Binding(
+                                get: { advBrim.map { $0 ? 1 : 0 } ?? -1 },
+                                set: { advBrim = $0 < 0 ? nil : ($0 == 1) }
+                            )) {
+                                Text("Profil").tag(-1); Text("An").tag(1); Text("Aus").tag(0)
+                            }
+                            .pickerStyle(.segmented).frame(width: 180)
+                        }
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text("Düsentemperatur")
+                                Spacer()
+                                Text(advNozzle.map { "\(Int($0)) °C" } ?? "Profil (\(profileNozzle) °C)")
+                                    .font(.caption).foregroundColor(.secondary).monospacedDigit()
+                            }
+                            Slider(value: Binding(get: { advNozzle ?? Double(profileNozzle) }, set: { advNozzle = $0 }), in: 150...300, step: 5)
+                        }
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text("Betttemperatur")
+                                Spacer()
+                                Text(advBed.map { "\(Int($0)) °C" } ?? "Profil (\(profileBed) °C)")
+                                    .font(.caption).foregroundColor(.secondary).monospacedDigit()
+                            }
+                            Slider(value: Binding(get: { advBed ?? Double(profileBed) }, set: { advBed = $0 }), in: 0...100, step: 5)
+                        }
+                        Button("Auf Profil zurücksetzen", role: .cancel) {
+                            advLayer = nil; advWalls = nil; advBrim = nil; advNozzle = nil; advBed = nil
+                        }
+                        .font(.footnote)
+                    }
                 } footer: {
-                    HintText(text: "Der Pi slicet mit Bambu-A1-Profilen (Düse max. 300 °C, Bett max. 100 °C). Je nach Modell dauert das 1–10 Minuten — der Fortschritt läuft hier live ein.")
+                    HintText(text: "Nur bei Bedarf: Werte wie in der Desktop-Software feinjustieren. Unberührt gilt das gewählte Profil.")
+                }
+                Section {
+                    Button("Slicen starten") {
+                        var p = params
+                        p.layerHeight = advLayer
+                        p.walls = advWalls
+                        p.brim = advBrim
+                        p.nozzleTemp = advNozzle.map { Int($0) }
+                        p.bedTemp = advBed.map { Int($0) }
+                        onSlice(p, autoPrint); dismiss()
+                    }
+                    .buttonStyle(PrimaryButtonStyle())
+                } footer: {
+                    HintText(text: "Der Pi slicet mit geprüften Bambu-A1-Profilen (Düse max. 300 °C, Bett max. 100 °C). 1–10 Minuten — Fortschritt läuft live ein.")
                 }
             }
             .navigationTitle("Slicen")
@@ -224,11 +317,12 @@ private struct ProfileSheet: View {
     }
 
     private var filamentOptions: [(key: String, value: FilamentInfo)] {
-        let defaults = ["pla": FilamentInfo(name: "PLA", nozzle: 220, bed: 65, note: nil),
-                        "petg": FilamentInfo(name: "PETG", nozzle: 250, bed: 70, note: nil),
-                        "tpu": FilamentInfo(name: "TPU", nozzle: 215, bed: 60, note: nil)]
+        let defaults = ["pla": FilamentInfo(name: "PLA", nozzle: 215, bed: 60, note: "Alltag: Deko & Prototypen"),
+                        "petg": FilamentInfo(name: "PETG", nozzle: 240, bed: 75, note: "Robust. Trocknen, Klebestift, Brim"),
+                        "tpu": FilamentInfo(name: "TPU 95A", nozzle: 228, bed: 40, note: "Flexibel. Externe Spule, langsam"),
+                        "asa": FilamentInfo(name: "ASA", nozzle: 260, bed: 90, note: "UV-fest. Nur kleine Teile")]
         let f = files.profiles?.filaments ?? defaults
-        return ["pla", "petg", "tpu"].compactMap { k in f[k].map { (k, $0) } }
+        return ["pla", "petg", "tpu", "asa"].compactMap { k in f[k].map { (k, $0) } }
     }
 
     private var qualityOptions: [(key: String, value: QualityInfo)] {

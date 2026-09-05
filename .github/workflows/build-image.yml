@@ -1,0 +1,43 @@
+name: Pi-Image bauen
+
+# Erzeugt das flash-fertige bambu-controller.img.xz und hängt es ans Release.
+# Start: GitHub → Actions → Pi-Image bauen → Run workflow (oder per Tag v*).
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: pi-gen Abhängigkeiten
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y quilt parted qemu-user-static debootstrap \
+            zerofree zip dosfstools libcap2-bin libfmt-dev git
+      - name: Image bauen
+        run: |
+          cd pi_image
+          bash stage-bambu/prerun.sh
+          [[ -d pi-gen ]] || git clone --depth 1 https://github.com/RPi-Distro/pi-gen.git
+          printf '%s\n' \
+            'IMG_NAME=bambu-controller' \
+            'RELEASE=bookworm' \
+            'DEPLOY_COMPRESSION=xz' \
+            'STAGE_LIST="stage0 stage1 stage2 ./stage-bambu"' \
+            > config
+          cp -r stage-bambu pi-gen/stage-bambu
+          (cd pi-gen && sudo ./build.sh)
+      - name: Image als Artefakt
+        uses: actions/upload-artifact@v4
+        with:
+          name: bambu-controller-img
+          path: pi_image/pi-gen/deploy/bambu-controller.img.xz
+      - name: An Release hängen (nur bei Tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: pi_image/pi-gen/deploy/bambu-controller.img.xz
