@@ -15,6 +15,14 @@ enum AppTheme {
     static let title2b = Font.title2.bold()
 }
 
+/// Brand font: Space Grotesk (Google Fonts, OFL) — geometric, techy, playful.
+/// Delivered as variable TTF in Resources/Fonts, registered via UIAppFonts.
+extension Font {
+    static func brand(_ size: CGFloat, weight: Font.Weight = .medium) -> Font {
+        .custom("Space Grotesk", size: size).weight(weight)
+    }
+}
+
 /// Rounded card container used across all screens
 struct Card: ViewModifier {
     func body(content: Content) -> some View {
@@ -87,7 +95,7 @@ struct StatCard: View {
             .accessibilityHidden(true)
             HStack(alignment: .firstTextBaseline, spacing: 3) {
                 Text(value)
-                    .font(.system(size: 30, weight: .semibold, design: .rounded))
+                    .font(.brand(30, weight: .semibold))
                     .monospacedDigit()
                     .foregroundColor(tint)
                     .minimumScaleFactor(0.7)

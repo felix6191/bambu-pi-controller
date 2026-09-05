@@ -46,7 +46,7 @@ struct DashboardView: View {
             .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Bambu Lab A1")
-                    .font(.title3).fontWeight(.bold)
+                    .font(.brand(21, weight: .bold))
                 Text(vm.status?.state.displayName ?? "Verbinde …")
                     .font(.subheadline).foregroundColor(.secondary)
             }

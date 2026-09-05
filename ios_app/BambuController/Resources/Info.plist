@@ -31,6 +31,10 @@
 	<string>Für Kamerabild des 3D-Druckers</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Für Verbindung zum lokalen Raspberry Pi Server</string>
+	<key>UIAppFonts</key>
+	<array>
+		<string>SpaceGrotesk.ttf</string>
+	</array>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>

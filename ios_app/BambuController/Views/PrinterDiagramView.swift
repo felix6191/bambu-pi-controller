@@ -1,6 +1,6 @@
-// PrinterDiagramView.swift - Stylized Bambu Lab A1 with live values at their
-// physical positions: nozzle at the toolhead, bed at the heatbed, chamber
-// top-right, progress on the printed object. Toolhead + object animate with progress.
+// PrinterDiagramView.swift - Hero image of the Bambu A1 with live values
+// overlaid at their physical positions: nozzle temp at the toolhead,
+// bed temp at the base plate, chamber/ambient top-right, progress ring on top.
 import SwiftUI
 
 struct PrinterDiagramView: View {
@@ -11,205 +11,177 @@ struct PrinterDiagramView: View {
         return min(max(s.printJob.progress / 100, 0), 1)
     }
 
+    /// Accent glow matching the current machine state (calm when idle)
+    private var glowColor: Color {
+        guard let s = status else { return .gray }
+        switch s.state {
+        case .printing: return AppTheme.accent
+        case .paused: return .orange
+        default: return .gray
+        }
+    }
+
     var body: some View {
         GeometryReader { geo in
             let w = geo.size.width, h = geo.size.height
             ZStack {
-                // Frame: columns, top bar, feet
-                machineFrame(w: w, h: h)
-                // Bed + printed object
-                bedAndObject(w: w, h: h)
-                // X rail + moving toolhead
-                toolhead(w: w, h: h)
-                // Value pills with connectors
+                // soft status-colored aurora behind the printer
+                RadialGradient(
+                    colors: [glowColor.opacity(status == nil ? 0.08 : 0.22), .clear],
+                    center: .center, startRadius: h * 0.05, endRadius: h * 0.55
+                )
+                .scaleEffect(status?.state == .printing ? 1.04 : 1.0)
+                .animation(.easeInOut(duration: 1.2), value: status?.state)
+
+                Image("printer-hero")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: w, height: h)
+                    .shadow(color: .black.opacity(0.25), radius: 12, x: 0, y: 8)
+
                 if let s = status {
+                    chamberPill(s, w: w, h: h)
                     nozzlePill(s, w: w, h: h)
                     bedPill(s, w: w, h: h)
-                    chamberPill(s, w: w, h: h)
-                    fanPill(s, w: w, h: h)
-                    progressLabel(s, w: w, h: h)
+                    progressBadge(s, w: w, h: h)
                 } else {
-                    Text("Keine Daten")
-                        .font(.caption).foregroundColor(.secondary)
-                        .position(x: w * 0.5, y: h * 0.5)
+                    VStack(spacing: 6) {
+                        ProgressView()
+                        Text("Verbinde …")
+                            .font(.brand(13))
+                            .foregroundColor(.secondary)
+                    }
+                    .position(x: w * 0.5, y: h * 0.45)
                 }
             }
         }
-        .aspectRatio(0.98, contentMode: .fit)
+        .aspectRatio(1.05, contentMode: .fit)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(diagramSummary)
     }
 
     private var diagramSummary: String {
-        guard let s = status else { return "Druckerdiagramm, keine Daten" }
-        return "Druckerdiagramm: \(s.state.displayName), Düse \(Int(s.nozzleTemp)) von \(Int(s.nozzleTargetTemp)) Grad, Bett \(Int(s.bedTemp)) von \(Int(s.bedTargetTemp)) Grad, Fortschritt \(Int(s.printJob.progress)) Prozent"
+        guard let s = status else { return "Druckerbild, keine Daten" }
+        return "Drucker: \(s.state.displayName), Düse \(Int(s.nozzleTemp)) von \(Int(s.nozzleTargetTemp)) Grad, Bett \(Int(s.bedTemp)) von \(Int(s.bedTargetTemp)) Grad, Fortschritt \(Int(s.printJob.progress)) Prozent"
     }
 
-    // MARK: - Machine
+    // MARK: - Anchors on the rendered printer (fractions of the image frame)
 
-    private func machineFrame(w: CGFloat, h: CGFloat) -> some View {
-        let metal = Color(.systemGray3)
-        return ZStack {
-            // columns
-            RoundedRectangle(cornerRadius: 4).fill(metal)
-                .frame(width: w * 0.055, height: h * 0.90)
-                .position(x: w * 0.13, y: h * 0.495)
-            RoundedRectangle(cornerRadius: 4).fill(metal)
-                .frame(width: w * 0.055, height: h * 0.90)
-                .position(x: w * 0.87, y: h * 0.495)
-            // top bar
-            RoundedRectangle(cornerRadius: 5).fill(metal)
-                .frame(width: w * 0.84, height: h * 0.05)
-                .position(x: w * 0.5, y: h * 0.065)
-            // brand dot
-            Circle().fill(AppTheme.accent)
-                .frame(width: 7, height: 7)
-                .position(x: w * 0.5, y: h * 0.065)
-            // feet
-            RoundedRectangle(cornerRadius: 3).fill(Color(.systemGray4))
-                .frame(width: w * 0.12, height: h * 0.03)
-                .position(x: w * 0.13, y: h * 0.955)
-            RoundedRectangle(cornerRadius: 3).fill(Color(.systemGray4))
-                .frame(width: w * 0.12, height: h * 0.03)
-                .position(x: w * 0.87, y: h * 0.955)
-            // X rail
-            RoundedRectangle(cornerRadius: 3).fill(Color(.systemGray2))
-                .frame(width: w * 0.74, height: h * 0.028)
-                .position(x: w * 0.5, y: h * 0.28)
-        }
-    }
+    private func nozzleAnchor(w: CGFloat, h: CGFloat) -> CGPoint { CGPoint(x: w * 0.545, y: h * 0.395) }
+    private func bedAnchor(w: CGFloat, h: CGFloat) -> CGPoint { CGPoint(x: w * 0.46, y: h * 0.79) }
 
-    private func bedAndObject(w: CGFloat, h: CGFloat) -> some View {
-        let bedTop = h * 0.70
-        let objH = CGFloat(progress) * h * 0.30
-        return ZStack {
-            // bed rails
-            RoundedRectangle(cornerRadius: 2).fill(Color(.systemGray4))
-                .frame(width: w * 0.56, height: h * 0.018)
-                .position(x: w * 0.5, y: h * 0.775)
-            // heatbed
-            RoundedRectangle(cornerRadius: 4)
-                .fill(LinearGradient(colors: [Color(.systemGray2), Color(.systemGray4)], startPoint: .top, endPoint: .bottom))
-                .frame(width: w * 0.60, height: h * 0.045)
-                .position(x: w * 0.5, y: bedTop + h * 0.022)
-            // printed object grows with progress
-            if progress > 0.005 {
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(LinearGradient(colors: [AppTheme.accent, AppTheme.accent.opacity(0.45)], startPoint: .top, endPoint: .bottom))
-                    .frame(width: w * 0.30, height: max(objH, 4))
-                    .position(x: w * 0.5, y: bedTop - max(objH, 4) / 2)
-                    .animation(.easeInOut(duration: 1), value: progress)
-            }
-        }
-    }
-
-    private func toolhead(w: CGFloat, h: CGFloat) -> some View {
-        let tx = w * (0.24 + 0.52 * progress)
-        let railBottom = h * 0.294
-        return ZStack {
-            // head box
-            RoundedRectangle(cornerRadius: 5).fill(Color(.systemGray))
-                .frame(width: w * 0.17, height: h * 0.075)
-                .position(x: tx, y: railBottom + h * 0.037)
-                .animation(.easeInOut(duration: 1), value: progress)
-            // nozzle tip
-            Path { p in
-                p.move(to: CGPoint(x: tx - w * 0.018, y: railBottom + h * 0.075))
-                p.addLine(to: CGPoint(x: tx + w * 0.018, y: railBottom + h * 0.075))
-                p.addLine(to: CGPoint(x: tx, y: railBottom + h * 0.105))
-                p.closeSubpath()
-            }
-            .fill(nozzleDot)
-            // heat glow when hot
-            if let s = status, s.nozzleTemp > 50 {
-                Circle().fill(Color.orange.opacity(0.35))
-                    .frame(width: 10, height: 10)
-                    .position(x: tx, y: railBottom + h * 0.105)
-            }
-        }
-    }
-
-    private var nozzleDot: Color {
-        guard let s = status else { return .gray }
-        if s.nozzleTargetTemp > 0 && s.nozzleTargetTemp - s.nozzleTemp > 3 { return .orange }
-        if s.nozzleTemp > 50 { return AppTheme.accent }
-        return .gray
-    }
-
-    private func nozzleTip(w: CGFloat, h: CGFloat) -> CGPoint {
-        CGPoint(x: w * (0.24 + 0.52 * progress), y: h * 0.294 + h * 0.105)
-    }
-
-    // MARK: - Value overlays
+    // MARK: - Overlays
 
     private func nozzlePill(_ s: PrinterStatus, w: CGFloat, h: CGFloat) -> some View {
-        let tip = nozzleTip(w: w, h: h)
-        let px = w * 0.20, py = h * 0.155
+        let target = nozzleAnchor(w: w, h: h)
+        let px = w * 0.165, py = h * 0.28
         return ZStack {
-            Path { p in
-                p.move(to: CGPoint(x: px + w * 0.10, y: py + 12))
-                p.addLine(to: CGPoint(x: tip.x, y: tip.y - 4))
-            }.stroke(Color.secondary.opacity(0.6), lineWidth: 1)
-            Circle().fill(nozzleDot).frame(width: 6, height: 6).position(tip)
-            ValuePill(icon: "thermometer.high", text: "\(Int(s.nozzleTemp))° / \(Int(s.nozzleTargetTemp))°", tint: .orange)
+            connector(from: CGPoint(x: px + w * 0.10, y: py + 14), to: target)
+            anchorDot(at: target, hot: s.nozzleTemp > 50)
+            ValuePill(icon: "thermometer.high",
+                      title: "Düse",
+                      text: "\(Int(s.nozzleTemp))° / \(Int(s.nozzleTargetTemp))°",
+                      tint: .orange)
                 .position(x: px, y: py)
         }
     }
 
     private func bedPill(_ s: PrinterStatus, w: CGFloat, h: CGFloat) -> some View {
-        let ex = w * 0.80, ey = h * 0.722
-        let px = w * 0.80, py = h * 0.60
+        let target = bedAnchor(w: w, h: h)
+        let px = w * 0.82, py = h * 0.60
         return ZStack {
-            Path { p in
-                p.move(to: CGPoint(x: px, y: py + 12))
-                p.addLine(to: CGPoint(x: ex, y: ey))
-            }.stroke(Color.secondary.opacity(0.6), lineWidth: 1)
-            Circle().fill(Color.red).frame(width: 6, height: 6).position(x: ex, y: ey)
-            ValuePill(icon: "square.stack.3d.up.fill", text: "\(Int(s.bedTemp))° / \(Int(s.bedTargetTemp))°", tint: .red)
+            connector(from: CGPoint(x: px - w * 0.11, y: py + 14), to: target)
+            anchorDot(at: target, hot: s.bedTemp > 40)
+            ValuePill(icon: "square.stack.3d.up.fill",
+                      title: "Bett",
+                      text: "\(Int(s.bedTemp))° / \(Int(s.bedTargetTemp))°",
+                      tint: .red)
                 .position(x: px, y: py)
         }
     }
 
     private func chamberPill(_ s: PrinterStatus, w: CGFloat, h: CGFloat) -> some View {
-        ValuePill(icon: "thermometer.medium", text: "\(Int(s.chamberTemp))°", tint: .purple)
-            .position(x: w * 0.80, y: h * 0.155)
+        ValuePill(icon: "thermometer.medium",
+                  title: "Raum",
+                  text: "\(Int(s.chamberTemp))°",
+                  tint: .blue)
+            .position(x: w * 0.82, y: h * 0.12)
     }
 
-    private func fanPill(_ s: PrinterStatus, w: CGFloat, h: CGFloat) -> some View {
-        let tx = w * (0.24 + 0.52 * progress)
-        return ValuePill(icon: "fanblades.fill", text: "\(s.fanSpeed) %", tint: .blue)
-            .position(x: min(tx + w * 0.20, w * 0.82), y: h * 0.40)
-    }
-
-    private func progressLabel(_ s: PrinterStatus, w: CGFloat, h: CGFloat) -> some View {
-        let objH = CGFloat(progress) * h * 0.30
-        let y = max(h * 0.70 - objH - h * 0.075, h * 0.44)
-        return VStack(spacing: 1) {
-            Text("\(Int(s.printJob.progress)) %")
-                .font(.title2).fontWeight(.bold).monospacedDigit()
+    private func progressBadge(_ s: PrinterStatus, w: CGFloat, h: CGFloat) -> some View {
+        VStack(spacing: 4) {
+            ZStack {
+                Circle().stroke(Color(.systemGray4), lineWidth: 5).frame(width: 64, height: 64)
+                Circle()
+                    .trim(from: 0, to: progress)
+                    .stroke(AppTheme.accent, style: StrokeStyle(lineWidth: 5, lineCap: .round))
+                    .frame(width: 64, height: 64)
+                    .rotationEffect(.degrees(-90))
+                    .animation(.easeInOut(duration: 0.8), value: progress)
+                Text("\(Int(s.printJob.progress))")
+                    .font(.brand(20, weight: .bold))
+                    .monospacedDigit()
+                    .contentTransition(.numericText())
+            }
+            .background(Circle().fill(.ultraThinMaterial))
             if s.printJob.totalLayers > 0 {
-                Text("Schicht \(s.printJob.currentLayer)/\(s.printJob.totalLayers)")
-                    .font(.caption2).foregroundColor(.secondary).monospacedDigit()
+                Text("\(s.printJob.currentLayer)/\(s.printJob.totalLayers) Layer")
+                    .font(.brand(11))
+                    .foregroundColor(.secondary)
+                    .monospacedDigit()
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(.ultraThinMaterial, in: Capsule())
             }
         }
-        .position(x: w * 0.5, y: y)
-        .animation(.easeInOut(duration: 1), value: progress)
+        .position(x: w * 0.18, y: h * 0.72)
+    }
+
+    // MARK: - Connector drawing
+
+    private func connector(from: CGPoint, to: CGPoint) -> some View {
+        Path { p in
+            p.move(to: from)
+            p.addLine(to: to)
+        }
+        .stroke(style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+        .foregroundColor(.secondary.opacity(0.55))
+    }
+
+    private func anchorDot(at point: CGPoint, hot: Bool) -> some View {
+        ZStack {
+            if hot {
+                Circle().fill(Color.orange.opacity(0.30))
+                    .frame(width: 16, height: 16)
+                    .phaseAnimator([0.6, 1.0]) { view, phase in view.scaleEffect(phase) } animation: { _ in
+                        .easeInOut(duration: 1.0).repeatForever(autoreverses: true)
+                    }
+            }
+            Circle().fill(hot ? Color.orange : Color(.systemGray3))
+                .frame(width: 6, height: 6)
+        }
+        .position(point)
     }
 }
 
 private struct ValuePill: View {
     let icon: String
+    let title: String
     let text: String
     let tint: Color
     var body: some View {
-        HStack(spacing: 4) {
-            Image(systemName: icon).font(.caption2).foregroundColor(tint)
-            Text(text).font(.caption2).fontWeight(.semibold).monospacedDigit()
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.caption2).foregroundColor(tint)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(title).font(.brand(9)).foregroundColor(.secondary)
+                Text(text).font(.brand(12, weight: .bold)).monospacedDigit()
+            }
         }
-        .padding(.horizontal, 7).padding(.vertical, 5)
+        .padding(.horizontal, 10).padding(.vertical, 7)
         .background(.ultraThinMaterial)
-        .cornerRadius(8)
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.25), lineWidth: 0.5))
+        .cornerRadius(12)
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.secondary.opacity(0.25), lineWidth: 0.5))
+        .shadow(color: .black.opacity(0.15), radius: 4, x: 0, y: 2)
     }
 }
 
