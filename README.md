@@ -1,33 +1,29 @@
 # Bambu Pi Controller
 
-Lokale Steuerung für Bambu Lab A1 3D-Drucker über Raspberry Pi mit iOS App (SwiftUI) und sicherer Remote-Zugriff via Tailscale.
+Dein Bambu Lab A1 — vom iPhone aus überwachen und steuern, von überall. Der Raspberry Pi ist die Brücke, Tailscale der sichere Tunnel. Keine Vorkenntnisse nötig.
 
-## 🚀 One-Click Installation (Empfohlen)
+## 🚀 In 3 Schritten startklar (kein Vorwissen nötig)
 
-**Auf dem Raspberry Pi ausführen:**
+**Schritt 1 · Pi vorbereiten:** Raspberry Pi OS auf SD-Karte flashen, Pi starten, ins gleiche WLAN wie den Drucker bringen.
+
+**Schritt 2 · Ein Befehl auf dem Pi** (Terminal öffnen, einfügen, Enter — der Rest ist ein geführter Dialog auf Deutsch):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/DEIN_USERNAME/bambu-pi-controller/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/felix6191/bambu-pi-controller/main/install.sh | sudo bash
 ```
 
-Oder lokal nach Clone:
-```bash
-git clone https://github.com/DEIN_USERNAME/bambu-pi-controller.git
-cd bambu-pi-controller
-sudo ./install.sh
-```
+Der Installer prüft alles selbst und fragt dich Schritt für Schritt: Drucker-IP, Seriennummer, Access Code (steht alles am Drucker-Display bzw. auf dem Aufkleber — mit Anleitung). Falsche Eingaben werden sofort bemängelt, die Drucker-Erreichbarkeit wird getestet, Tailscale-Login geht per Link. Am Ende zeigt er dir **genau die 2 Werte, die du ins iPhone tippen musst** (werden auch in `IPHONE_SETUP.txt` gespeichert, jederzeit via `sudo bambu iphone` erneut anzeigbar).
 
-Der Installer macht **alles automatisch**:
-- ✅ Docker & Docker Compose installieren
-- ✅ Tailscale installieren & verbinden
-- ✅ Repository klonen
-- ✅ **Interaktiv Drucker-Daten abfragen** (IP, Serial, Access Code)
-- ✅ Sicheren API-Token generieren
-- ✅ Container bauen & starten
-- ✅ Health Check warten
-- ✅ Zusammenfassung mit allen Zugriffsdaten anzeigen
+**Schritt 3 · iPhone:** App öffnen → Einrichtung folgen (oder Demo-Modus zum Ausprobieren) → die 2 Werte vom Pi-Bildschirm eintragen → „Verbindung testen" → ✅ fertig.
 
-**Danach:** iOS App in Xcode öffnen → auf iPhone installieren → Einstellungen eintragen → läuft weltweit.
+**Später auf dem Pi (alles mit einem Wort):**
+| Befehl | Was passiert |
+|---|---|
+| `sudo bambu status` | Läuft alles? Adressen anzeigen |
+| `sudo bambu iphone` | Server-URL + Token erneut anzeigen |
+| `sudo bambu logs` | Live-Protokoll |
+| `sudo bambu update` | Aktualisieren |
+| `sudo bambu reconfigure` | Druckerdaten korrigieren |
 
 ---
 

@@ -1,0 +1,49 @@
+#!/bin/bash
+# bambu — Helfer für den Bambu Pi Controller (wird vom Installer nach /usr/local/bin kopiert)
+#   sudo bambu status | iphone | logs | update | reconfigure | restart
+INSTALL_DIR="/opt/bambu-pi-controller"
+SERVICE_USER="bambu"
+
+cmd="${1:-help}"
+case "$cmd" in
+  status)
+    echo "— Container —"
+    sudo -u "$SERVICE_USER" docker compose -f "$INSTALL_DIR/docker-compose.yml" ps
+    echo ""
+    echo "— Gesundheit —"
+    curl -s http://localhost:8000/health || echo "Server antwortet nicht"
+    echo ""
+    echo "— Adressen —"
+    echo "LAN:       http://$(hostname -I | awk '{print $1}'):8000"
+    if command -v tailscale &>/dev/null; then
+      echo "Tailscale:  http://$(tailscale ip -4 2>/dev/null || echo 'nicht verbunden'):8000"
+    fi
+    ;;
+  iphone)
+    cat "$INSTALL_DIR/IPHONE_SETUP.txt" 2>/dev/null || echo "Noch nicht installiert. Erst install.sh laufen lassen."
+    ;;
+  logs)
+    sudo -u "$SERVICE_USER" docker compose -f "$INSTALL_DIR/docker-compose.yml" logs -f bambu-controller
+    ;;
+  restart)
+    sudo -u "$SERVICE_USER" docker compose -f "$INSTALL_DIR/docker-compose.yml" restart
+    echo "Neu gestartet."
+    ;;
+  update)
+    cd "$INSTALL_DIR" && git pull --ff-only origin main
+    sudo -u "$SERVICE_USER" docker compose up -d --build
+    echo "Aktualisiert."
+    ;;
+  reconfigure)
+    exec bash "$INSTALL_DIR/install.sh" --configure
+    ;;
+  *)
+    echo "Benutzung: sudo bambu {status|iphone|logs|restart|update|reconfigure}"
+    echo "  status      Zeigt Container, Gesundheit und Adressen"
+    echo "  iphone      Zeigt Server-URL + Token für die iPhone-App"
+    echo "  logs        Live-Protokoll des Servers"
+    echo "  restart     Server neu starten"
+    echo "  update      Neueste Version holen + neu starten"
+    echo "  reconfigure Druckerdaten korrigieren"
+    ;;
+esac
