@@ -1,3 +1,5 @@
 """Core package."""
 from app.core.config import settings
-__all__ = ["settings"]
+from app.core import state
+
+__all__ = ["settings", "state"]

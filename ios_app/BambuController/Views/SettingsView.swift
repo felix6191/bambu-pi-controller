@@ -10,15 +10,15 @@ struct SettingsView: View {
         NavigationStack {
             Form {
                 Section("Server Verbindung") {
-                    TextField("Server URL (z.B. http://100.x.x.x:8000)", text: $settings.serverURL).textInputAutocapitalization(.never).autocorrectionDisabled().onChange(of: settings.serverURL) { settings.save() }
+                    TextField("Server URL (z.B. http://100.x.x.x:8000)", text: $settings.serverURL).textInputAutocapitalization(.never).autocorrectionDisabled().onChange(of: settings.serverURL) { settings.commit(); WebSocketService.shared.disconnect(); if settings.autoConnect { WebSocketService.shared.connect() } }
                     HStack {
                         Text("API Token"); Spacer()
                         if showToken { TextField("Token", text: $settings.apiToken).textInputAutocapitalization(.never).autocorrectionDisabled() }
                         else { SecureField("Token", text: $settings.apiToken).textInputAutocapitalization(.never).autocorrectionDisabled() }
                         Button { showToken.toggle() } label: { Image(systemName: showToken ? "eye.slash" : "eye") }
-                    }.onChange(of: settings.apiToken) { settings.save() }
-                    Toggle("Tailscale verwenden", isOn: $settings.useTailscale).onChange(of: settings.useTailscale) { settings.save() }
-                    Toggle("Auto-Verbinden", isOn: $settings.autoConnect).onChange(of: settings.autoConnect) { settings.save() }
+                    }.onChange(of: settings.apiToken) { settings.commit(); WebSocketService.shared.disconnect(); if settings.autoConnect { WebSocketService.shared.connect() } }
+                    Toggle("Tailscale verwenden", isOn: $settings.useTailscale).onChange(of: settings.useTailscale) { settings.commit() }
+                    Toggle("Auto-Verbinden", isOn: $settings.autoConnect).onChange(of: settings.autoConnect) { settings.commit() }
                 }
                 Section {
                     Button("Verbindung testen") { testConnection() }.disabled(settings.serverURL.isEmpty || settings.apiToken.isEmpty)

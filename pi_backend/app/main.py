@@ -1,29 +1,30 @@
 """Main FastAPI application."""
-import asyncio
+import sys
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, status
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from loguru import logger
 
 from app.core.config import settings
+from app.core import state as app_state
 from app.mqtt.client import BambuMQTTClient
 from app.api import printer, camera, system
 
-printer_client: BambuMQTTClient | None = None
+logger.remove()
+logger.add(sys.stderr, level=settings.log_level.upper())
+
 status_subscribers: set[WebSocket] = set()
 
 
 async def broadcast_status(status_data: dict[str, Any]) -> None:
-    disconnected = set()
-    for ws in status_subscribers:
+    for ws in list(status_subscribers):
         try:
             await ws.send_json(status_data)
         except Exception:
-            disconnected.add(ws)
-    status_subscribers -= disconnected
+            status_subscribers.discard(ws)
 
 
 async def on_printer_status_update(printer_status) -> None:
@@ -36,27 +37,38 @@ async def on_printer_push_event(push_msg) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global printer_client
     logger.info("Starting Bambu Pi Controller...")
 
-    printer_client = BambuMQTTClient(
+    if not settings.printer_host or not settings.printer_serial or not settings.api_token:
+        logger.warning("PRINTER_HOST/SERIAL/API_TOKEN missing — API boots, printer calls return 503 until configured")
+
+    app_state.printer_client = BambuMQTTClient(
         host=settings.printer_host,
         serial=settings.printer_serial,
         access_code=settings.printer_access_code,
+        port=settings.printer_port,
+        use_tls=settings.printer_use_tls,
         on_status_update=on_printer_status_update,
         on_push_event=on_printer_push_event,
     )
-    try:
-        await printer_client.connect()
-        logger.info("Printer connected successfully")
-    except Exception as e:
-        logger.error(f"Failed to connect to printer: {e}")
+    if settings.printer_host:
+        for attempt in range(1, 4):
+            try:
+                await app_state.printer_client.connect()
+                logger.info("Printer connected successfully")
+                break
+            except Exception as e:
+                logger.error(f"Printer connect attempt {attempt}/3 failed: {e}")
+                if attempt == 3:
+                    logger.warning("Continuing without printer connection; will retry on demand")
+    else:
+        logger.warning("No PRINTER_HOST configured, skipping MQTT connect")
 
     yield
 
     logger.info("Shutting down...")
-    if printer_client:
-        await printer_client.disconnect()
+    if app_state.printer_client:
+        await app_state.printer_client.disconnect()
 
 
 app = FastAPI(
@@ -69,7 +81,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -78,6 +90,8 @@ security = HTTPBearer(auto_error=False)
 
 
 async def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
+    if not settings.api_token:
+        raise HTTPException(status_code=500, detail="API token not configured on server")
     if not credentials or credentials.credentials != settings.api_token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -87,21 +101,39 @@ async def verify_token(credentials: HTTPAuthorizationCredentials = Depends(secur
     return credentials.credentials
 
 
+async def verify_token_or_query(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    token: str | None = Query(default=None),
+) -> str:
+    """Accept Bearer header (preferred) or ?token= query (for <img>/MJPEG where headers can't be set)."""
+    if not settings.api_token:
+        raise HTTPException(status_code=500, detail="API token not configured on server")
+    candidate = credentials.credentials if credentials else token
+    if candidate != settings.api_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing API token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return settings.api_token
+
+
 app.include_router(printer.router, prefix="/api/v1/printer", tags=["printer"], dependencies=[Depends(verify_token)])
-app.include_router(camera.router, prefix="/api/v1/camera", tags=["camera"], dependencies=[Depends(verify_token)])
+app.include_router(camera.router, prefix="/api/v1/camera", tags=["camera"], dependencies=[Depends(verify_token_or_query)])
 app.include_router(system.router, prefix="/api/v1/system", tags=["system"], dependencies=[Depends(verify_token)])
 
 
 @app.get("/health")
-async def health_check() -> dict[str, str]:
-    return {"status": "ok", "printer_connected": "true" if printer_client and printer_client.connected else "false"}
+async def health_check() -> dict[str, bool | str]:
+    connected = app_state.printer_client is not None and app_state.printer_client.connected
+    return {"status": "ok", "printer_connected": connected}
 
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket) -> None:
     await websocket.accept()
     token = websocket.query_params.get("token")
-    if token != settings.api_token:
+    if not settings.api_token or token != settings.api_token:
         await websocket.close(code=4001, reason="Invalid token")
         return
 
@@ -109,10 +141,15 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     logger.info(f"WebSocket connected. Total: {len(status_subscribers)}")
 
     try:
-        if printer_client:
-            await websocket.send_json({"type": "status", "data": printer_client.status.model_dump(mode="json")})
+        if app_state.printer_client:
+            await websocket.send_json({"type": "status", "data": app_state.printer_client.status.model_dump(mode="json")})
         while True:
-            await websocket.receive_text()
+            try:
+                msg = await websocket.receive_text()
+                if msg == "ping":
+                    await websocket.send_text("pong")
+            except WebSocketDisconnect:
+                break
     except WebSocketDisconnect:
         pass
     except Exception as e:
@@ -120,9 +157,3 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     finally:
         status_subscribers.discard(websocket)
         logger.info(f"WebSocket disconnected. Total: {len(status_subscribers)}")
-
-
-def get_printer_client() -> BambuMQTTClient:
-    if not printer_client:
-        raise HTTPException(status_code=503, detail="Printer not connected")
-    return printer_client

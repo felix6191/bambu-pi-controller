@@ -5,6 +5,9 @@ services:
       dockerfile: Dockerfile
     container_name: bambu-controller
     restart: unless-stopped
+    env_file:
+      - path: ./pi_backend/.env
+        required: false
     environment:
       - PRINTER_HOST=${PRINTER_HOST}
       - PRINTER_SERIAL=${PRINTER_SERIAL}

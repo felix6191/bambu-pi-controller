@@ -51,6 +51,20 @@ class PrintJobInfo(BaseModel):
     filament_type: str = ""
     filament_color: str = ""
 
+    @staticmethod
+    def _format(seconds: int) -> str:
+        seconds = max(0, seconds)
+        h, m = seconds // 3600, (seconds % 3600) // 60
+        return f"{h}h {m}m" if h else f"{m}m"
+
+    @property
+    def formatted_elapsed(self) -> str:
+        return self._format(self.elapsed_time)
+
+    @property
+    def formatted_remaining(self) -> str:
+        return self._format(self.remaining_time)
+
 
 class PrinterStatus(BaseModel):
     state: PrinterState = PrinterState.UNKNOWN

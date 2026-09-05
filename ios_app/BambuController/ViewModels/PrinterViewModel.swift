@@ -11,27 +11,48 @@ class PrinterViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var errorMessage: String?
     @Published var showError = false
+    /// Live printer limits. Defaults to A1; tightened from status when known.
+    @Published var limits = PrinterLimits.bambuA1
 
     private let api = APIService.shared
     private let ws = WebSocketService.shared
 
     private init() {
-        ws.onStatusUpdate = { [weak self] s in Task { @MainActor in self?.status = s } }
-        ws.onEvent = { [weak self] e in Task { @MainActor in self?.handleEvent(e) } }
+        ws.onStatusUpdate = { [weak self] s in self?.status = s; self?.adaptLimits(from: s) }
+        ws.onEvent = { [weak self] e in self?.handleEvent(e) }
         if AppSettings.shared.autoConnect && !AppSettings.shared.serverURL.isEmpty { ws.connect() }
     }
 
     private func handleEvent(_ event: WSMessage) { print("Event: \(event.type)") }
 
+    /// Tighten limits from live data (never widen beyond physical A1 caps).
+    private func adaptLimits(from s: PrinterStatus) {
+        // If printer reports a lower target capability, respect it; never exceed hardware caps.
+        // Currently the A1 caps are the source of truth; hook for future /capabilities endpoint.
+        limits = PrinterLimits.bambuA1
+    }
+
+    // MARK: - Clamping helpers (prevent printer rejections before sending)
+
+    func clampedNozzle(_ t: Int) -> Int { limits.clampNozzle(t) }
+    func clampedBed(_ t: Int) -> Int { limits.clampBed(t) }
+    func clampedSpeed(_ s: Int) -> Int { limits.clampSpeed(s) }
+    func clampedFlow(_ f: Int) -> Int { limits.clampFlow(f) }
+
     func loadStatus() async {
         isLoading = true; errorMessage = nil
-        do { status = try await api.getStatus() }
+        do {
+            let s = try await api.getStatus()
+            status = s; adaptLimits(from: s)
+        }
         catch { errorMessage = error.localizedDescription; showError = true }
         isLoading = false
     }
 
     func startPrint(filename: String, bedTemp: Int = 0, nozzleTemp: Int = 0) async {
-        do { _ = try await api.startPrint(filename: filename, bedTemp: bedTemp, nozzleTemp: nozzleTemp) }
+        let name = filename.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { errorMessage = "Dateiname fehlt"; showError = true; return }
+        do { _ = try await api.startPrint(filename: name, bedTemp: clampedBed(bedTemp), nozzleTemp: clampedNozzle(nozzleTemp)) }
         catch { errorMessage = error.localizedDescription; showError = true }
     }
 
@@ -51,24 +72,24 @@ class PrinterViewModel: ObservableObject {
     }
 
     func setNozzleTemperature(_ temp: Int) async {
-        do { _ = try await api.setTemperature(nozzle: temp, bed: nil) }
+        do { _ = try await api.setTemperature(nozzle: clampedNozzle(temp), bed: nil) }
         catch { errorMessage = error.localizedDescription; showError = true }
     }
 
     func setBedTemperature(_ temp: Int) async {
-        do { _ = try await api.setTemperature(nozzle: nil, bed: temp) }
+        do { _ = try await api.setTemperature(nozzle: nil, bed: clampedBed(temp)) }
         catch { errorMessage = error.localizedDescription; showError = true }
     }
 
     func setPrintSpeed(_ speed: Int) async {
-        do { _ = try await api.setSpeed(speed) }
+        do { _ = try await api.setSpeed(clampedSpeed(speed)) }
         catch { errorMessage = error.localizedDescription; showError = true }
     }
 
     func setFlowRate(_ flow: Int) async {
-        do { _ = try await api.setFlow(flow) }
+        do { _ = try await api.setFlow(clampedFlow(flow)) }
         catch { errorMessage = error.localizedDescription; showError = true }
     }
 
-    func reconnect() { ws.connect() }
+    func reconnect() { ws.disconnect(); ws.connect() }
 }

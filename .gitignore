@@ -29,9 +29,9 @@ Thumbs.db
 # Docker
 docker-compose.override.yml
 
-# iOS
-ios_app/BambuController.xcodeproj/project.xcworkspace/
-ios_app/BambuController.xcodeproj/xcuserdata/
+# iOS (generated project + user state; project.yml is the source of truth — run `xcodegen generate`)
+ios_app/BambuController.xcodeproj/
+ios_app/Bambucontroller IOS/
 ios_app/build/
 ios_app/DerivedData/
 *.pbxuser

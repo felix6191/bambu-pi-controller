@@ -1,16 +1,16 @@
 """Printer API routes."""
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.mqtt.client import BambuMQTTClient
-from app.main import get_printer_client
+from app.core.state import get_printer_client
 
 router = APIRouter()
 
 
 class TemperatureRequest(BaseModel):
-    nozzle: int | None = Field(None, ge=0, le=300)
-    bed: int | None = Field(None, ge=0, le=120)
+    nozzle: int | None = Field(default=None, ge=0, le=300)
+    bed: int | None = Field(default=None, ge=0, le=120)
 
 
 class SpeedRequest(BaseModel):
@@ -23,8 +23,8 @@ class FlowRequest(BaseModel):
 
 class PrintStartRequest(BaseModel):
     filename: str = Field(..., min_length=1)
-    bed_temp: int = Field(0, ge=0, le=120)
-    nozzle_temp: int = Field(0, ge=0, le=300)
+    bed_temp: int = Field(default=0, ge=0, le=120)
+    nozzle_temp: int = Field(default=0, ge=0, le=300)
 
     class Config:
         populate_by_name = True
@@ -69,6 +69,8 @@ async def stop_print(client: BambuMQTTClient = Depends(get_printer_client)):
 
 @router.post("/temperature")
 async def set_temperature(request: TemperatureRequest, client: BambuMQTTClient = Depends(get_printer_client)):
+    if request.nozzle is None and request.bed is None:
+        raise HTTPException(status_code=400, detail="Provide at least nozzle or bed temperature")
     success = await client.set_temperatures(nozzle=request.nozzle, bed=request.bed)
     if not success:
         raise HTTPException(status_code=500, detail="Failed to set temperature")

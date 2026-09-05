@@ -1,12 +1,12 @@
 #!/bin/bash
 # bambu-pi-installer.sh - One-Click Installer für Bambu Pi Controller
-# Führe aus: curl -fsSL https://raw.githubusercontent.com/DEIN_USERNAME/bambu-pi-controller/main/install.sh | sudo bash
+# Führe aus: curl -fsSL https://raw.githubusercontent.com/felix6191/bambu-pi-controller/main/install.sh | sudo bash
 # Oder lokal: chmod +x install.sh && sudo ./install.sh
 
 set -e
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
-REPO_URL="https://github.com/DEIN_USERNAME/bambu-pi-controller.git"
+REPO_URL="https://github.com/felix6191/bambu-pi-controller.git"
 INSTALL_DIR="/opt/bambu-pi-controller"
 SERVICE_USER="bambu"
 
@@ -67,7 +67,13 @@ setup_config() {
     sed -i "s|API_TOKEN=.*|API_TOKEN=$API_TOKEN|" "$env"
 
     read -p "Tailscale Auth-Key (leer=überspringen): " TS_KEY
-    [[ -n "$TS_KEY" ]] && sed -i "s|TAILSCALE_AUTHKEY=.*|TAILSCALE_AUTHKEY=$TS_KEY|" "$env"
+    if [[ -n "$TS_KEY" ]]; then
+        if grep -q "^TAILSCALE_AUTHKEY=" "$env"; then
+            sed -i "s|^TAILSCALE_AUTHKEY=.*|TAILSCALE_AUTHKEY=$TS_KEY|" "$env"
+        else
+            echo "TAILSCALE_AUTHKEY=$TS_KEY" >> "$env"
+        fi
+    fi
 
     read -p "Kamera Stream URL (optional): " CAM_URL
     [[ -n "$CAM_URL" ]] && sed -i "s|# CAMERA_URL=.*|CAMERA_URL=$CAM_URL|" "$env"
@@ -77,8 +83,8 @@ setup_config() {
 
 setup_tailscale() {
     local ts_key=$(grep "TAILSCALE_AUTHKEY=" "$INSTALL_DIR/pi_backend/.env" | cut -d= -f2)
-    [[ -z "$ts_key" || "$ts_key" == "TS_KEY" ]] && { warn "Kein Tailscale Key - nur LAN-Zugriff"; return; }
-    log "Verbinde Tailscale..."; sudo -u "$SERVICE_USER" tailscale up --authkey="$ts_key" --hostname=bambu-pi --accept-routes 2>/dev/null || true
+    [[ -z "$ts_key" ]] && { warn "Kein Tailscale Key - nur LAN-Zugriff"; return; }
+    log "Verbinde Tailscale..."; tailscale up --authkey="$ts_key" --hostname=bambu-pi --accept-routes 2>/dev/null || true
     sleep 3; local ts_ip=$(tailscale ip -4 2>/dev/null || echo "verbunden"); ok "Tailscale: $ts_ip"
 }
 

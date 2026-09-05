@@ -22,11 +22,14 @@ targets:
     platform: iOS
     sources:
       - path: BambuController
+        excludes:
+          - Resources/Info.plist
     resources:
       - path: BambuController/Resources
     settings:
-      base:
-        SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
+      configs:
+        Debug:
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
     scheme:
       testTargets: []
       gatherCoverageData: false

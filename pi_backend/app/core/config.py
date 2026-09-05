@@ -1,24 +1,23 @@
 """Application configuration."""
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
 
 
 class Settings(BaseSettings):
-    printer_host: str = Field(..., alias="PRINTER_HOST")
-    printer_serial: str = Field(..., alias="PRINTER_SERIAL")
-    printer_access_code: str = Field(..., alias="PRINTER_ACCESS_CODE")
-    host: str = Field("0.0.0.0", alias="HOST")
-    port: int = Field(8000, alias="PORT")
-    log_level: str = Field("INFO", alias="LOG_LEVEL")
-    api_token: str = Field(..., alias="API_TOKEN")
-    camera_url: str | None = Field(None, alias="CAMERA_URL")
-    camera_username: str | None = Field(None, alias="CAMERA_USERNAME")
-    camera_password: str | None = Field(None, alias="CAMERA_PASSWORD")
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        extra = "ignore"
+    printer_host: str = Field(default="", alias="PRINTER_HOST")
+    printer_serial: str = Field(default="", alias="PRINTER_SERIAL")
+    printer_access_code: str = Field(default="", alias="PRINTER_ACCESS_CODE")
+    printer_port: int = Field(default=8883, alias="PRINTER_PORT")
+    printer_use_tls: bool = Field(default=True, alias="PRINTER_USE_TLS")
+    host: str = Field(default="0.0.0.0", alias="HOST")
+    port: int = Field(default=8000, alias="PORT")
+    log_level: str = Field(default="INFO", alias="LOG_LEVEL")
+    api_token: str = Field(default="", alias="API_TOKEN")
+    camera_url: str | None = Field(default=None, alias="CAMERA_URL")
+    camera_username: str | None = Field(default=None, alias="CAMERA_USERNAME")
+    camera_password: str | None = Field(default=None, alias="CAMERA_PASSWORD")
 
 
 settings = Settings()

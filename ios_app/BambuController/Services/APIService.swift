@@ -5,7 +5,14 @@ import Combine
 @MainActor
 class APIService: ObservableObject {
     static let shared = APIService()
-    private let session = URLSession.shared
+
+    private let session: URLSession = {
+        let cfg = URLSessionConfiguration.default
+        cfg.timeoutIntervalForRequest = 15
+        cfg.timeoutIntervalForResource = 30
+        cfg.waitsForConnectivity = true
+        return URLSession(configuration: cfg)
+    }()
 
     private init() {}
 
@@ -13,17 +20,29 @@ class APIService: ObservableObject {
     private var token: String { AppSettings.shared.apiToken }
 
     private func request<T: Decodable>(_ endpoint: String, method: String = "GET", body: Data? = nil, _ type: T.Type) async throws -> T {
-        guard let url = URL(string: "\(baseURL)/api/v1\(endpoint)") else { throw APIError.invalidURL }
+        guard !baseURL.isEmpty, let url = URL(string: "\(baseURL)/api/v1\(endpoint)") else { throw APIError.invalidURL }
         var req = URLRequest(url: url)
         req.httpMethod = method
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = body
 
-        let (data, resp) = try await session.data(for: req)
+        let (data, resp): (Data, URLResponse)
+        do {
+            (data, resp) = try await session.data(for: req)
+        } catch let e as URLError where e.code == .timedOut {
+            throw APIError.timeout
+        } catch {
+            throw APIError.network(error)
+        }
         guard let http = resp as? HTTPURLResponse else { throw APIError.invalidResponse }
+        if http.statusCode == 401 { throw APIError.unauthorized }
         guard 200...299 ~= http.statusCode else { throw APIError.httpError(http.statusCode, data) }
-        return try JSONDecoder().decode(T.self, from: data)
+        do {
+            return try JSONDecoder().decode(T.self, from: data)
+        } catch {
+            throw APIError.decodingError(error)
+        }
     }
 
     // Printer
@@ -44,20 +63,29 @@ class APIService: ObservableObject {
         try await request("/printer/flow", method: "POST", body: try JSONEncoder().encode(FlowRequest(flow: flow)), APIResponse.self)
     }
 
-    // Camera
-    func getCameraStreamURL() -> URL? { URL(string: "\(baseURL)/api/v1/camera/stream?token=\(token)") }
-    func getCameraSnapshotURL() -> URL? { URL(string: "\(baseURL)/api/v1/camera/snapshot?token=\(token)") }
+    // Camera (backend accepts ?token= query since <img>/MJPEG can't set headers)
+    func getCameraStreamURL() -> URL? {
+        guard !baseURL.isEmpty else { return nil }
+        return URL(string: "\(baseURL)/api/v1/camera/stream?token=\(token)")
+    }
+    func getCameraSnapshotURL() -> URL? {
+        guard !baseURL.isEmpty else { return nil }
+        return URL(string: "\(baseURL)/api/v1/camera/snapshot?token=\(token)")
+    }
 }
 
 enum APIError: LocalizedError {
-    case invalidURL, invalidResponse, httpError(Int, Data), decodingError(Error), notConnected
+    case invalidURL, invalidResponse, httpError(Int, Data), decodingError(Error), notConnected, unauthorized, timeout, network(Error)
     var errorDescription: String? {
         switch self {
-        case .invalidURL: return "Ungültige Server-URL"
+        case .invalidURL: return "Keine Server-URL konfiguriert (Einstellungen)"
         case .invalidResponse: return "Ungültige Server-Antwort"
         case .httpError(let c, _): return "Server-Fehler: \(c)"
         case .decodingError(let e): return "Datenfehler: \(e.localizedDescription)"
         case .notConnected: return "Nicht mit Drucker verbunden"
+        case .unauthorized: return "Falscher API-Token (Einstellungen prüfen)"
+        case .timeout: return "Zeitüberschreitung — Pi erreichbar? (Tailscale an?)"
+        case .network(let e): return "Netzwerkfehler: \(e.localizedDescription)"
         }
     }
 }

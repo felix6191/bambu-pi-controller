@@ -1,5 +1,6 @@
 // Models.swift - Data models for Bambu Lab printer status and API responses
 import Foundation
+import SwiftUI
 
 // MARK: - Printer Status
 
@@ -47,27 +48,46 @@ enum PrinterState: String, Codable, CaseIterable {
         }
     }
 
-    var color: String {
+    var color: Color {
         switch self {
-        case .idle: return "green"
-        case .printing: return "blue"
-        case .paused: return "orange"
-        case .busy: return "purple"
-        case .error: return "red"
-        case .unknown: return "gray"
+        case .idle: return .green
+        case .printing: return .blue
+        case .paused: return .orange
+        case .busy: return .purple
+        case .error: return .red
+        case .unknown: return .gray
         }
     }
 
     var systemImage: String {
         switch self {
         case .idle: return "checkmark.circle.fill"
-        case .printing: return "printer.filled.and.paper.fill"
+        case .printing: return "printer.filled.and.paper"
         case .paused: return "pause.circle.fill"
         case .busy: return "gear.circle.fill"
         case .error: return "exclamationmark.triangle.fill"
         case .unknown: return "questionmark.circle.fill"
         }
     }
+}
+
+/// Physical printer limits (Bambu Lab A1 defaults).
+/// All setters clamp to these *before* sending, so the printer never
+/// rejects a command and the user never sees a preventable error.
+struct PrinterLimits: Codable, Equatable {
+    var maxNozzleTemp: Int = 300
+    var maxBedTemp: Int = 100
+    var minSpeed: Int = 50
+    var maxSpeed: Int = 200
+    var minFlow: Int = 50
+    var maxFlow: Int = 150
+
+    static let bambuA1 = PrinterLimits()
+
+    func clampNozzle(_ t: Int) -> Int { Swift.min(Swift.max(0, t), maxNozzleTemp) }
+    func clampBed(_ t: Int) -> Int { Swift.min(Swift.max(0, t), maxBedTemp) }
+    func clampSpeed(_ s: Int) -> Int { Swift.min(Swift.max(minSpeed, s), maxSpeed) }
+    func clampFlow(_ f: Int) -> Int { Swift.min(Swift.max(minFlow, f), maxFlow) }
 }
 
 struct PrintJobInfo: Codable {
@@ -155,7 +175,7 @@ struct AppSettings: Codable {
     var useTailscale: Bool = true
     var autoConnect: Bool = true
 
-    static let shared = AppSettings.load()
+    static var shared = AppSettings.load()
 
     static func load() -> AppSettings {
         if let data = UserDefaults.standard.data(forKey: "AppSettings"),
@@ -164,6 +184,12 @@ struct AppSettings: Codable {
     }
 
     func save() { if let d = try? JSONEncoder().encode(self) { UserDefaults.standard.set(d, forKey: "AppSettings") } }
+
+    /// Persist AND publish to the live singleton so API/WS pick up changes immediately.
+    func commit() {
+        save()
+        Self.shared = self
+    }
 
     var baseURL: String { serverURL.hasSuffix("/") ? String(serverURL.dropLast()) : serverURL }
     var wsURL: String {

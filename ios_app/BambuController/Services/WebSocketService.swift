@@ -12,6 +12,7 @@ class WebSocketService: ObservableObject {
     private var task: URLSessionWebSocketTask?
     private let session = URLSession.shared
     private var reconnectTimer: Timer?
+    private var pingTimer: Timer?
     private var attempts = 0
     private let maxAttempts = 5
 
@@ -21,18 +22,36 @@ class WebSocketService: ObservableObject {
     private init() {}
 
     func connect() {
-        guard !isConnected, let url = URL(string: AppSettings.shared.wsURL) else { return }
+        let ws = AppSettings.shared.wsURL
+        guard !isConnected, !ws.isEmpty, let url = URL(string: ws), url.scheme == "ws" || url.scheme == "wss" else { return }
+        disconnect(silent: true)
         task = session.webSocketTask(with: url)
         task?.resume()
         attempts = 0
+        isConnected = true
+        lastError = nil
         receive()
+        startPing()
     }
 
-    func disconnect() {
+    func disconnect(silent: Bool = false) {
         reconnectTimer?.invalidate(); reconnectTimer = nil
+        pingTimer?.invalidate(); pingTimer = nil
         task?.cancel(with: .goingAway, reason: nil)
         task = nil
-        isConnected = false
+        if !silent { isConnected = false }
+        else { isConnected = false }
+    }
+
+    private func startPing() {
+        pingTimer?.invalidate()
+        pingTimer = Timer.scheduledTimer(withTimeInterval: 20, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.task?.sendPing { [weak self] err in
+                    if err != nil { Task { @MainActor in self?.handleDisconnect(err ?? URLError(.badServerResponse)) } }
+                }
+            }
+        }
     }
 
     private func receive() {

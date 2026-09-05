@@ -1,5 +1,5 @@
 """Camera API routes."""
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, HTTPException, Response
 from fastapi.responses import StreamingResponse
 import httpx
 

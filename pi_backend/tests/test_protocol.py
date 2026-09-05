@@ -2,7 +2,7 @@
 import pytest
 from app.mqtt.protocol import (
     build_request, parse_push_message, parse_report_message,
-    PrinterState, PrintCommand, PrintJobInfo, PrinterStatus
+    PrinterState, PrintJobInfo, PrinterStatus
 )
 
 
