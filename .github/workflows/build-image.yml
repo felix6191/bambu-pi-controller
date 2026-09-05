@@ -2,6 +2,8 @@ name: Pi-Image bauen
 
 # Erzeugt das flash-fertige bambu-controller.img.xz und hängt es ans Release.
 # Start: GitHub → Actions → Pi-Image bauen → Run workflow (oder per Tag v*).
+# Der Build läuft in einem eigenen nativen debian-Container (kein pi-gen-
+# Docker-Skript, kein i386-Image) — root per --privileged für loop-mounts.
 on:
   workflow_dispatch:
   push:
@@ -13,20 +15,27 @@ jobs:
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v5
-      - name: Host-Emulation für armhf (qm-arm via Kernel-binfmt)
+      - name: Host-Emulation für armhf (Kernel-binfmt, gilt auch im Container)
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq qemu-user-static binfmt-support arch-test
-      - name: Image bauen (pi-gen im Docker, alle Deps inklusive)
+          sudo apt-get install -y -qq qemu-user-static binfmt-support
+      - name: Stage vorbereiten (Tarball + pi-gen-Config)
         run: |
           cd pi_image
           bash prepare-stage.sh
-          (cd pi-gen && sudo ./build-docker.sh -c ./config)
-      - name: Image als Artefakt
-        uses: actions/upload-artifact@v5
-        with:
-          name: bambu-controller-img
-          path: pi_image/pi-gen/deploy/bambu-controller.img.xz
+      - name: Image bauen (eigener Container, natives debian:bookworm)
+        run: |
+          cd pi_image/pi-gen
+          sudo docker run --privileged --rm \
+            -v "$PWD:/pi-gen" -w /pi-gen \
+            debian:bookworm bash -e -o pipefail -c "
+              apt-get update -qq &&
+              apt-get install -y -qq git quilt parted coreutils qemu-user-static \
+                debootstrap zerofree zip dosfstools e2fsprogs libcap2-bin \
+                libarchive-tools grep rsync xz-utils curl xxd file kmod bc \
+                gpg pigz arch-test binfmt-support ca-certificates fdisk &&
+              ./build.sh
+            "
       - name: Image als Artefakt
         uses: actions/upload-artifact@v5
         with:

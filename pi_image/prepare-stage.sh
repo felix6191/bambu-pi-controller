@@ -14,13 +14,6 @@ tar --exclude='.git' --exclude='__pycache__' --exclude='.DS_Store' \
 echo "Repo-Tarball: $(du -h "$PI_IMAGE/stage-bambu/bambu-repo.tar.gz" | cut -f1)"
 rm -rf "$PI_IMAGE/pi-gen/stage-bambu"
 cp -r "$PI_IMAGE/stage-bambu" "$PI_IMAGE/pi-gen/stage-bambu"
-# Docker-Basis nativ zum Host (statt i386): i386/debian gibt es für arm64
-# nicht als Manifest („no match for platform"), nativ läuft der Build direkt.
-sed 's#BASE_IMAGE=i386/debian:[^"]*#BASE_IMAGE=debian:bookworm#' \
-  "$PI_IMAGE/pi-gen/build-docker.sh" > "$PI_IMAGE/pi-gen/build-docker.sh.tmp" \
-  && mv "$PI_IMAGE/pi-gen/build-docker.sh.tmp" "$PI_IMAGE/pi-gen/build-docker.sh"
-grep -q 'BASE_IMAGE=debian:bookworm' "$PI_IMAGE/pi-gen/build-docker.sh" \
-  && echo "Docker-Basis: nativ (debian:bookworm)"
 printf '%s\n' \
   'IMG_NAME=bambu-controller' \
   'RELEASE=bookworm' \
