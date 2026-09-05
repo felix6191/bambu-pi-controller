@@ -137,6 +137,7 @@ ask() { # ask VAR "Prompt" "Default" "Hint"
 }
 
 wizard() {
+    local env="$ENV_FILE"
     title "Schritt 3/5 · Drucker einrichten (einmalig)"
     echo "Ich brauche 3 Angaben von deinem Bambu Lab A1."
     echo "Alle findest du wie folgt:"
@@ -144,6 +145,27 @@ wizard() {
     echo "  2. Seriennummer: Aufkleber am Drucker oder auf der Verpackung"
     echo "  3. Wichtig: Am Drucker muss der Entwickler-/LAN-Modus AN sein."
     echo ""
+    echo "  Bequemere Alternative: Hier ENTER drücken zum Überspringen und die"
+    echo "  3 Werte später direkt am Drucker stehend per iPhone-App nachtragen"
+    echo "  (App → Einrichtung → Drucker). Der Server startet auch ohne."
+    echo ""
+    if [[ -z "${PRINTER_HOST:-}" ]]; then
+        read -rp "  Jetzt eingeben (j) oder später per iPhone (s)? [j/s]: " _when
+        if [[ "$_when" == "s" || "$_when" == "S" ]]; then
+            log "Übersprungen — Drucker wird später per iPhone eingerichtet."
+            # Leere Platzhalter schreiben, API-Token trotzdem erzeugen
+            if [[ -z "${API_TOKEN:-}" ]]; then
+                API_TOKEN=$(grep "^API_TOKEN=" "$env" 2>/dev/null | cut -d= -f2)
+                [[ -z "$API_TOKEN" || "$API_TOKEN" == "your-secure-api-token-here" ]] && API_TOKEN=$(openssl rand -hex 32)
+            fi
+            cp "$INSTALL_DIR/pi_backend/.env.example" "$env" 2>/dev/null || true
+            sed -i "s|^API_TOKEN=.*|API_TOKEN=$API_TOKEN|" "$env"
+            sed -i "s|^PRINTER_HOST=.*|PRINTER_HOST=|" "$env"
+            chown "$SERVICE_USER:$SERVICE_USER" "$env"; chmod 600 "$env"
+            ok "Platzhalter gespeichert — weiter geht's"
+            return 0
+        fi
+    fi
 
     # Bestehende Werte als Vorschlag anbieten
     local old_host="" old_serial="" old_code=""

@@ -8,8 +8,14 @@ struct OnboardingView: View {
     @State private var showToken = false
     @State private var testResult: String?
     @State private var testing = false
-    @State private var showWherePrinter = false
     @State private var showWhereToken = false
+    @State private var showWherePrinter = false
+    @State private var printerHost = ""
+    @State private var printerSerial = ""
+    @State private var printerCode = ""
+    @State private var printerResult: String?
+    @State private var printerOK: Bool?
+    @State private var printerSending = false
 
     private let totalSteps = 4
 
@@ -22,8 +28,8 @@ struct OnboardingView: View {
 
                 TabView(selection: $step) {
                     welcomePage.tag(0)
-                    printerPage.tag(1)
-                    serverPage.tag(2)
+                    serverPage.tag(1)
+                    printerPage.tag(2)
                     finishPage.tag(3)
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
@@ -57,8 +63,7 @@ struct OnboardingView: View {
 
     private var stepValid: Bool {
         switch step {
-        case 1: return true // printer data optional (demo possible)
-        case 2: return settings.demoWanted ? true : (!settings.serverURL.isEmpty && !settings.apiToken.isEmpty)
+        case 1: return settings.demoWanted ? true : (!settings.serverURL.isEmpty && !settings.apiToken.isEmpty)
         default: return true
         }
     }
@@ -84,6 +89,8 @@ struct OnboardingView: View {
                     FeatureRow(icon: "gauge.with.dots.needle.33percent", title: "Live & Steuerung", text: "Temperaturen, Fortschritt, Pause/Stopp, Speed-Modi, Licht und Kamera.")
                 }
                 .padding(.horizontal)
+                DataSplitCard()
+                    .padding(.horizontal)
             }
         }
     }
@@ -91,39 +98,52 @@ struct OnboardingView: View {
     private var printerPage: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                Text("1 · Drucker").font(.caption).fontWeight(.bold).foregroundColor(AppTheme.accent)
-                Text("Bambu Lab A1 verbinden").font(.title2).fontWeight(.bold)
-                HintText(text: "Diese Daten trägt der Installer auf dem Pi ein — hier brauchst du sie nur, wenn du die Verbindung verstehen oder prüfen willst. Für die Demo kannst du alles leer lassen.")
-                Group {
-                    Text("Drucker-IP (Heimnetz)").font(.subheadline).fontWeight(.semibold)
-                    TextField("z. B. 192.168.1.50", text: $settings.printerIPHint)
-                        .textFieldStyle(.roundedBorder).textInputAutocapitalization(.never).autocorrectionDisabled()
-                        .keyboardType(.decimalPad)
-                    Text("Seriennummer").font(.subheadline).fontWeight(.semibold)
-                    TextField("z. B. 01S00A…", text: $settings.printerSerialHint)
-                        .textFieldStyle(.roundedBorder).textInputAutocapitalization(.never).autocorrectionDisabled()
-                    Text("LAN Access Code").font(.subheadline).fontWeight(.semibold)
-                    TextField("8-stelliger Code", text: $settings.printerCodeHint)
-                        .textFieldStyle(.roundedBorder).textInputAutocapitalization(.never).autocorrectionDisabled()
+                Text("2 · Drucker (am Drucker stehend ausfüllen)").font(.caption).fontWeight(.bold).foregroundColor(AppTheme.accent)
+                Text("A1 mit dem Pi verbinden").font(.title2).fontWeight(.bold)
+                HintText(text: "Geh mit dem Handy zum Drucker und tippe ab, was Display bzw. Aufkleber zeigen. Per „Weiter\" geht's auch ohne — nachholbar in den Einstellungen.")
+                if settings.serverURL.isEmpty || settings.apiToken.isEmpty {
+                    HintText(text: "Hinweis: Ohne Server-URL + Token (Schritt 1) kann ich noch nichts an den Pi schicken.")
                 }
+                Text("Drucker-IP (Heimnetz)").font(.subheadline).fontWeight(.semibold)
+                TextField("z. B. 192.168.1.50", text: $printerHost)
+                    .textFieldStyle(.roundedBorder).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .keyboardType(.decimalPad)
+                Text("Seriennummer").font(.subheadline).fontWeight(.semibold)
+                TextField("z. B. 01S00A…", text: $printerSerial)
+                    .textFieldStyle(.roundedBorder).textInputAutocapitalization(.never).autocorrectionDisabled()
+                Text("LAN Access Code (8-stellig)").font(.subheadline).fontWeight(.semibold)
+                TextField("z. B. 12345678", text: $printerCode)
+                    .textFieldStyle(.roundedBorder).textInputAutocapitalization(.never).autocorrectionDisabled()
                 Button("Wo finde ich diese Daten?") { showWherePrinter = true }
                     .font(.footnote)
                     .sheet(isPresented: $showWherePrinter) {
                         HelpSheet(title: "Druckerdaten finden", lines: [
-                            "1. Am A1: Einstellungen → Netzwerk → LAN-Zugriff / Access Code anzeigen.",
-                            "2. Seriennummer: Aufkleber am Drucker oder Originalverpackung.",
-                            "3. Drucker-IP: Am Display unter Netzwerk — oder in der Bambu Handy App.",
-                            "4. Wichtig: Entwicklermodus bzw. LAN-Modus am Drucker aktivieren.",
+                            "1. Am A1-Display: Einstellungen → Netzwerk → IP-Adresse + Access Code.",
+                            "2. Seriennummer: Aufkleber am Drucker oder auf der Verpackung.",
+                            "3. Wichtig: Entwickler-/LAN-Modus am Drucker muss AN sein.",
                         ])
                     }
+                Button {
+                    sendPrinterConfig()
+                } label: {
+                    if printerSending { ProgressView().frame(maxWidth: .infinity) }
+                    else { Text("An Pi senden & verbinden").frame(maxWidth: .infinity) }
+                }
+                .buttonStyle(.borderedProminent).tint(AppTheme.accent)
+                .disabled(printerHost.isEmpty || printerSerial.isEmpty || printerCode.isEmpty || printerSending
+                    || settings.serverURL.isEmpty || settings.apiToken.isEmpty)
+                if let r = printerResult {
+                    Text(r).font(.footnote).foregroundColor((printerOK ?? false) ? .green : .orange)
+                }
             }.padding()
         }
+        .onAppear { loadCurrentPrinterConfig() }
     }
 
     private var serverPage: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                Text("2 · Server (Raspberry Pi)").font(.caption).fontWeight(.bold).foregroundColor(AppTheme.accent)
+                Text("1 · Server (Raspberry Pi)").font(.caption).fontWeight(.bold).foregroundColor(AppTheme.accent)
                 Text("Mit dem Pi verbinden").font(.title2).fontWeight(.bold)
                 HintText(text: "Der Pi läuft als dein persönlicher Cloud-Ersatz. Zuhause nimmst du die Heimnetz-IP, von unterwegs die Tailscale-IP (100.x.x.x).")
                 Text("Server-URL").font(.subheadline).fontWeight(.semibold)
@@ -189,6 +209,7 @@ struct OnboardingView: View {
     // MARK: - Actions
 
     private func testConnection() {
+        settings.commit()
         testing = true; testResult = nil
         let url = settings.serverURL.hasSuffix("/") ? String(settings.serverURL.dropLast()) : settings.serverURL
         Task {
@@ -204,6 +225,41 @@ struct OnboardingView: View {
                 testResult = "❌ Nicht erreichbar: \(error.localizedDescription)"
             }
             testing = false
+        }
+    }
+
+    private func loadCurrentPrinterConfig() {
+        Task {
+            do {
+                let cfg = try await APIService.shared.getPrinterConfig()
+                if let h = cfg.printerHost, printerHost.isEmpty { printerHost = h }
+                if let s = cfg.printerSerial, printerSerial.isEmpty { printerSerial = s }
+                if cfg.printerConnected {
+                    printerOK = true
+                    printerResult = "✅ Drucker bereits verbunden."
+                }
+            } catch { /* still unconfigured — user types values */ }
+        }
+    }
+
+    private func sendPrinterConfig() {
+        settings.commit()
+        printerSending = true; printerResult = nil; printerOK = nil
+        let host = printerHost.trimmingCharacters(in: .whitespacesAndNewlines)
+        let serial = printerSerial.trimmingCharacters(in: .whitespacesAndNewlines)
+        let code = printerCode.trimmingCharacters(in: .whitespacesAndNewlines)
+        Task {
+            do {
+                let res = try await APIService.shared.savePrinterConfig(host: host, serial: serial, code: code)
+                printerOK = res.printerConnected
+                printerResult = res.printerConnected
+                    ? "✅ " + res.message
+                    : "⚠️ " + res.message
+            } catch {
+                printerOK = false
+                printerResult = "❌ \(error.localizedDescription)"
+            }
+            printerSending = false
         }
     }
 
@@ -252,6 +308,31 @@ private struct ModeCard: View {
             .overlay(RoundedRectangle(cornerRadius: AppTheme.cardRadius).stroke(selected ? AppTheme.accent : Color(.systemGray4), lineWidth: selected ? 2 : 1))
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// Explains once where each credential lives — printer data stays on the Pi.
+private struct DataSplitCard: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Wo liegt was?", systemImage: "folder.fill")
+                .font(.headline)
+            DataSplitRow(icon: "printer.fill", text: "Drucker-IP, Seriennummer & Access Code: **nur auf dem Pi** (fragt der Installer einmal ab).")
+            DataSplitRow(icon: "iphone", text: "Hier in der App brauchst du **nur Server-URL + Token** vom Pi-Bildschirm.")
+        }
+        .padding().card()
+    }
+}
+
+private struct DataSplitRow: View {
+    let icon, text: String
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: icon).foregroundColor(AppTheme.accent).frame(width: 22)
+            Text((try? AttributedString(markdown: text)) ?? AttributedString(text))
+                .font(.footnote).foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

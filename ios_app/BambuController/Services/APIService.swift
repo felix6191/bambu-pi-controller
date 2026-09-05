@@ -74,6 +74,21 @@ class APIService: ObservableObject {
         try await request("/printer/flow", method: "POST", body: try JSONEncoder().encode(FlowRequest(flow: flow)), APIResponse.self)
     }
 
+    // Phone-based printer setup: store credentials on the Pi + connect now
+    func getPrinterConfig() async throws -> PrinterConfigStatus {
+        try await request("/system/printer-config", PrinterConfigStatus.self)
+    }
+    func savePrinterConfig(host: String, serial: String, code: String) async throws -> PrinterConfigResult {
+        struct Body: Codable {
+            let printer_host: String
+            let printer_serial: String
+            let printer_access_code: String
+        }
+        return try await request("/system/printer-config", method: "POST",
+            body: try JSONEncoder().encode(Body(printer_host: host, printer_serial: serial, printer_access_code: code)),
+            PrinterConfigResult.self)
+    }
+
     // Camera (backend accepts ?token= query since <img>/MJPEG can't set headers)
     func getCameraStreamURL() -> URL? {
         guard !baseURL.isEmpty else { return nil }

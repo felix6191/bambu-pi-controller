@@ -224,6 +224,32 @@ struct APIResponse: Codable {
     var needsAttention: Bool { success && !(verified ?? true) }
 }
 
+struct PrinterConfigStatus: Codable {
+    let configured: Bool
+    let printerHost: String?
+    let printerSerial: String?
+    let printerConnected: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case configured
+        case printerHost = "printer_host"
+        case printerSerial = "printer_serial"
+        case printerConnected = "printer_connected"
+    }
+}
+
+struct PrinterConfigResult: Codable {
+    let success: Bool
+    let printerConnected: Bool
+    let message: String
+
+    enum CodingKeys: String, CodingKey {
+        case success
+        case printerConnected = "printer_connected"
+        case message
+    }
+}
+
 // MARK: - WebSocket Messages
 
 struct WSMessage: Codable { let type: String; let data: WSData? }
@@ -284,10 +310,7 @@ struct AppSettings: Codable {
     var autoConnect: Bool = true
     var onboarded: Bool = false
     var demoMode: Bool = false
-    // Onboarding helpers (info only — the Pi holds the real printer config)
-    var printerIPHint: String = ""
-    var printerSerialHint: String = ""
-    var printerCodeHint: String = ""
+    // Transient onboarding choice (demo vs. real), persisted harmlessly
     var demoWanted: Bool = true
 
     static var shared = AppSettings.load()

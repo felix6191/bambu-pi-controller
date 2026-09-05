@@ -12,7 +12,7 @@ Dein Bambu Lab A1 — vom iPhone aus überwachen und steuern, von überall. Der 
 curl -fsSL https://raw.githubusercontent.com/felix6191/bambu-pi-controller/main/install.sh | sudo bash
 ```
 
-Der Installer prüft alles selbst und fragt dich Schritt für Schritt: Drucker-IP, Seriennummer, Access Code (steht alles am Drucker-Display bzw. auf dem Aufkleber — mit Anleitung). Falsche Eingaben werden sofort bemängelt, die Drucker-Erreichbarkeit wird getestet, Tailscale-Login geht per Link. Am Ende zeigt er dir **genau die 2 Werte, die du ins iPhone tippen musst** (werden auch in `IPHONE_SETUP.txt` gespeichert, jederzeit via `sudo bambu iphone` erneut anzeigbar).
+Der Installer prüft alles selbst und fragt dich Schritt für Schritt: Drucker-IP, Seriennummer, Access Code (steht alles am Drucker-Display bzw. auf dem Aufkleber — mit Anleitung). Wer will, überspringt das und trägt die 3 Werte **bequem am Drucker stehend per iPhone-App** nach (Einrichtung → Drucker → „An Pi senden & verbinden" — der Pi speichert und verbindet sich sofort). Falsche Eingaben werden sofort bemängelt, die Drucker-Erreichbarkeit wird getestet, Tailscale-Login geht per Link. Am Ende zeigt er dir **genau die 2 Werte, die du ins iPhone tippen musst** (werden auch in `IPHONE_SETUP.txt` gespeichert, jederzeit via `sudo bambu iphone` erneut anzeigbar).
 
 **Schritt 3 · iPhone:** App öffnen → Einrichtung folgen (oder Demo-Modus zum Ausprobieren) → die 2 Werte vom Pi-Bildschirm eintragen → „Verbindung testen" → ✅ fertig.
 

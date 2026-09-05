@@ -1,7 +1,6 @@
 """Main FastAPI application."""
 import sys
 from contextlib import asynccontextmanager
-from typing import Any
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,29 +9,10 @@ from loguru import logger
 
 from app.core.config import settings
 from app.core import state as app_state
-from app.mqtt.client import BambuMQTTClient
 from app.api import printer, camera, system
 
 logger.remove()
 logger.add(sys.stderr, level=settings.log_level.upper())
-
-status_subscribers: set[WebSocket] = set()
-
-
-async def broadcast_status(status_data: dict[str, Any]) -> None:
-    for ws in list(status_subscribers):
-        try:
-            await ws.send_json(status_data)
-        except Exception:
-            status_subscribers.discard(ws)
-
-
-async def on_printer_status_update(printer_status) -> None:
-    await broadcast_status({"type": "status", "data": printer_status.model_dump(mode="json")})
-
-
-async def on_printer_push_event(push_msg) -> None:
-    await broadcast_status({"type": "event", "data": push_msg.model_dump(mode="json")})
 
 
 @asynccontextmanager
@@ -40,27 +20,16 @@ async def lifespan(app: FastAPI):
     logger.info("Starting Bambu Pi Controller...")
 
     if not settings.printer_host or not settings.printer_serial or not settings.api_token:
-        logger.warning("PRINTER_HOST/SERIAL/API_TOKEN missing — API boots, printer calls return 503 until configured")
+        logger.warning("PRINTER_HOST/SERIAL/API_TOKEN missing — API boots, printer calls return 503 until configured (use the iPhone setup or POST /system/printer-config)")
 
-    app_state.printer_client = BambuMQTTClient(
-        host=settings.printer_host,
-        serial=settings.printer_serial,
-        access_code=settings.printer_access_code,
-        port=settings.printer_port,
-        use_tls=settings.printer_use_tls,
-        on_status_update=on_printer_status_update,
-        on_push_event=on_printer_push_event,
-    )
     if settings.printer_host:
         for attempt in range(1, 4):
-            try:
-                await app_state.printer_client.connect()
+            if await app_state.reconnect_printer():
                 logger.info("Printer connected successfully")
                 break
-            except Exception as e:
-                logger.error(f"Printer connect attempt {attempt}/3 failed: {e}")
-                if attempt == 3:
-                    logger.warning("Continuing without printer connection; will retry on demand")
+            logger.error(f"Printer connect attempt {attempt}/3 failed")
+            if attempt == 3:
+                logger.warning("Continuing without printer connection; will retry on demand")
     else:
         logger.warning("No PRINTER_HOST configured, skipping MQTT connect")
 
@@ -137,8 +106,8 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         await websocket.close(code=4001, reason="Invalid token")
         return
 
-    status_subscribers.add(websocket)
-    logger.info(f"WebSocket connected. Total: {len(status_subscribers)}")
+    app_state.status_subscribers.add(websocket)
+    logger.info(f"WebSocket connected. Total: {len(app_state.status_subscribers)}")
 
     try:
         if app_state.printer_client:
@@ -155,5 +124,5 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
     finally:
-        status_subscribers.discard(websocket)
-        logger.info(f"WebSocket disconnected. Total: {len(status_subscribers)}")
+        app_state.status_subscribers.discard(websocket)
+        logger.info(f"WebSocket disconnected. Total: {len(app_state.status_subscribers)}")
