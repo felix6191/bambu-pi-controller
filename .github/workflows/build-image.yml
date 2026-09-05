@@ -12,13 +12,8 @@ jobs:
   build:
     runs-on: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@v4
-      - name: pi-gen Abhängigkeiten
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y quilt parted qemu-user-static debootstrap \
-            zerofree zip dosfstools libcap2-bin libfmt-dev git
-      - name: Image bauen
+      - uses: actions/checkout@v5
+      - name: Image bauen (pi-gen im Docker, alle Deps inklusive)
         run: |
           cd pi_image
           bash stage-bambu/prerun.sh
@@ -28,9 +23,14 @@ jobs:
             'RELEASE=bookworm' \
             'DEPLOY_COMPRESSION=xz' \
             'STAGE_LIST="stage0 stage1 stage2 ./stage-bambu"' \
-            > config
+            > pi-gen/config
           cp -r stage-bambu pi-gen/stage-bambu
-          (cd pi-gen && sudo ./build.sh)
+          (cd pi-gen && sudo ./build-docker.sh)
+      - name: Image als Artefakt
+        uses: actions/upload-artifact@v5
+        with:
+          name: bambu-controller-img
+          path: pi_image/pi-gen/deploy/bambu-controller.img.xz
       - name: Image als Artefakt
         uses: actions/upload-artifact@v4
         with:
