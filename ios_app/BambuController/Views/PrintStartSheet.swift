@@ -5,8 +5,8 @@ struct PrintStartSheet: View {
     @Environment(\.dismiss) var dismiss
     @ObservedObject private var vm = PrinterViewModel.shared
     @State private var filename = ""
-    @State private var bedTemp = 60
-    @State private var nozzleTemp = 210
+    @State private var bedTemp = AppSettings.shared.defaultBedTemp
+    @State private var nozzleTemp = AppSettings.shared.defaultNozzleTemp
     @State private var loading = false
 
     var body: some View {

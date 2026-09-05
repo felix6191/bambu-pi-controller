@@ -17,7 +17,7 @@ struct OnboardingView: View {
     @State private var printerOK: Bool?
     @State private var printerSending = false
 
-    private let totalSteps = 4
+    private let totalSteps = 5
 
     var body: some View {
         NavigationStack {
@@ -30,7 +30,8 @@ struct OnboardingView: View {
                     welcomePage.tag(0)
                     serverPage.tag(1)
                     printerPage.tag(2)
-                    finishPage.tag(3)
+                    defaultsPage.tag(3)
+                    finishPage.tag(4)
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
                 .animation(.easeInOut, value: step)
@@ -187,10 +188,38 @@ struct OnboardingView: View {
         }
     }
 
+    private var defaultsPage: some View {
+        ScrollView {
+            VStack(spacing: 6) {
+                Text("3 · Deine Standards").font(.caption).fontWeight(.bold).foregroundColor(AppTheme.accent)
+                Text("Womit druckst\ndu am meisten?")
+                    .font(.system(.largeTitle, design: .serif)).fontWeight(.bold)
+                    .multilineTextAlignment(.center)
+                HintText(text: "Einfach am Lineal ziehen — die App schlägt diese Werte beim Druckstart vor.")
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal)
+                VStack(spacing: 22) {
+                    VStack(spacing: 2) {
+                        Text("Düse").font(.headline)
+                        RulerSlider(value: $settings.defaultNozzleTemp, range: 0...300, step: 5, unit: "°C", tint: .orange, presets: [190, 210, 230])
+                    }
+                    .onChange(of: settings.defaultNozzleTemp) { _, _ in settings.commit() }
+                    VStack(spacing: 2) {
+                        Text("Druckbett").font(.headline)
+                        RulerSlider(value: $settings.defaultBedTemp, range: 0...100, step: 5, unit: "°C", tint: .red, presets: [50, 60, 70])
+                    }
+                    .onChange(of: settings.defaultBedTemp) { _, _ in settings.commit() }
+                }
+                .padding(.top, 8)
+                Spacer(minLength: 20)
+            }.padding()
+        }
+    }
+
     private var finishPage: some View {
         ScrollView {
             VStack(spacing: 18) {
-                Text("3 · Los geht's").font(.caption).fontWeight(.bold).foregroundColor(AppTheme.accent)
+                Text("4 · Los geht's").font(.caption).fontWeight(.bold).foregroundColor(AppTheme.accent)
                 Text("Bereit?").font(.largeTitle).fontWeight(.bold)
                 ModeCard(
                     icon: "play.circle.fill", title: "Demo ausprobieren",

@@ -406,6 +406,9 @@ struct AppSettings: Codable {
     var demoMode: Bool = false
     // Transient onboarding choice (demo vs. real), persisted harmlessly
     var demoWanted: Bool = true
+    // Favorite defaults from the playful onboarding sliders (prefill for new prints)
+    var defaultNozzleTemp: Int = 210
+    var defaultBedTemp: Int = 60
 
     static var shared = AppSettings.load()
 
