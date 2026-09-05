@@ -271,6 +271,10 @@ class BambuMQTTClient:
     async def _gcode(self, line: str) -> bool:
         return await self._print(PrintCommand.GCODE_LINE.value, {"param": line})
 
+    async def start_gcode_file(self, remote_path: str) -> bool:
+        """Start a .gcode file already on the printer filesystem (absolute path)."""
+        return await self._print("gcode_file", {"param": remote_path}, timeout=15.0)
+
     async def set_temperatures(self, nozzle: int | None = None, bed: int | None = None) -> dict[str, Any]:
         """Set targets via G-code, then verify against reported target temps.
 

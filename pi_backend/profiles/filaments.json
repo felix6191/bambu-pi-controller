@@ -1,0 +1,6 @@
+{
+  "_note": "Community startpunt temperatures for Bambu Lab A1 (official bed max 100C, nozzle max 300C). Used by the slice worker to render start G-code. Tune to your spool.",
+  "pla":  { "name": "PLA",  "nozzle": 220, "bed": 65, "fan_percent": 100, "note": "PLA/PLA Basic/Silk/Matte" },
+  "petg": { "name": "PETG", "nozzle": 250, "bed": 70, "fan_percent": 60,  "note": "PETG / PETG-HF, dry spool recommended" },
+  "tpu":  { "name": "TPU",  "nozzle": 215, "bed": 60, "fan_percent": 80,  "note": "TPU 95A, print slow, direct drive" }
+}

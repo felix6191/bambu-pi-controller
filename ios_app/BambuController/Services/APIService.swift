@@ -89,6 +89,54 @@ class APIService: ObservableObject {
             PrinterConfigResult.self)
     }
 
+    // Files: STL upload (multipart) + jobs
+    func uploadFile(data: Data, filename: String) async throws -> SliceJob {
+        guard !baseURL.isEmpty, let url = URL(string: "\(baseURL)/api/v1/files/upload") else { throw APIError.invalidURL }
+        let boundary = "Boundary-\(UUID().uuidString)"
+        var req = URLRequest(url: url, timeoutInterval: 600)
+        req.httpMethod = "POST"
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        var body = Data()
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: application/octet-stream\r\n\r\n".data(using: .utf8)!)
+        body.append(data)
+        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
+        let (respData, resp): (Data, URLResponse)
+        do { (respData, resp) = try await session.upload(for: req, from: body) }
+        catch let e as URLError where e.code == .timedOut { throw APIError.timeout }
+        catch { throw APIError.network(error) }
+        guard let http = resp as? HTTPURLResponse else { throw APIError.invalidResponse }
+        if http.statusCode == 401 { throw APIError.unauthorized }
+        if http.statusCode == 413 { throw APIError.httpError(413, respData) }
+        guard 200...299 ~= http.statusCode else { throw APIError.httpError(http.statusCode, respData) }
+        do { return try JSONDecoder().decode(SliceJob.self, from: respData) }
+        catch { throw APIError.decodingError(error) }
+    }
+
+    func listJobs() async throws -> [SliceJob] {
+        try await request("/files/jobs", JobList.self).jobs
+    }
+
+    func sliceJob(id: String, params: SliceParams) async throws -> SliceJob {
+        try await request("/files/jobs/\(id)/slice", method: "POST", body: try JSONEncoder().encode(params), SliceJob.self)
+    }
+
+    func printJob(id: String) async throws -> SliceJob {
+        try await request("/files/jobs/\(id)/print", method: "POST", SliceJob.self)
+    }
+
+    func deleteJob(id: String) async throws -> APIResponse {
+        struct R: Codable { let success: Bool }
+        let r: R = try await request("/files/jobs/\(id)", method: "DELETE", R.self)
+        return APIResponse(success: r.success, verified: nil, via: nil)
+    }
+
+    func getProfiles() async throws -> ProfilesResponse {
+        try await request("/files/profiles", ProfilesResponse.self)
+    }
+
     // Camera (backend accepts ?token= query since <img>/MJPEG can't set headers)
     func getCameraStreamURL() -> URL? {
         guard !baseURL.isEmpty else { return nil }

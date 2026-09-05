@@ -8,6 +8,7 @@ struct ContentView: View {
     var body: some View {
         TabView {
             DashboardView().tabItem { Label("Dashboard", systemImage: "house.fill") }
+            FilesView().tabItem { Label("Dateien", systemImage: "doc.fill") }
             ControlsView().tabItem { Label("Steuerung", systemImage: "slider.horizontal.3") }
             CameraView().tabItem { Label("Kamera", systemImage: "camera.fill") }
             SettingsView().tabItem { Label("Einstellungen", systemImage: "gearshape.fill") }

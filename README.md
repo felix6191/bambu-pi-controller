@@ -159,8 +159,31 @@ bambu-pi-controller/
 | `/api/v1/printer/capabilities` | GET | Offizielle A1-Limits (Düse 300 °C, Bett 100 °C, Speed-Presets) |
 | `/api/v1/camera/stream` | GET | MJPEG Stream |
 | `/api/v1/camera/snapshot` | GET | Einzelbild |
+| `/api/v1/system/printer-config` | GET/POST | Druckerdaten lesen / per iPhone setzen + verbinden |
+| `/api/v1/files/upload` | POST | STL/3MF/OBJ/STEP hochladen (multipart, max. 200 MB) |
+| `/api/v1/files/jobs` | GET | Alle Slice-/Druckjobs |
+| `/api/v1/files/jobs/{id}` | GET/DELETE | Job-Status / löschen |
+| `/api/v1/files/jobs/{id}/slice` | POST | Slicen starten (filament, quality, supports, infill) |
+| `/api/v1/files/jobs/{id}/print` | POST | Per FTP auf Drucker-SD laden + Druck starten |
+| `/api/v1/files/profiles` | GET | Verfügbare Filamente, Qualitäten, Slicer |
 
 Alle Endpoints (außer `/health`) benötigen `Authorization: Bearer <API_TOKEN>`.
+
+## STL → Druck (Teilen → Slicen → Drucken)
+
+App: Datei importieren → Filament (PLA/PETG/TPU), Qualität (Entwurf/Standard/Fein), Stützen, Infill wählen → Slicen → Drucken. Status live: `uploaded → queued → slicing → sliced → uploading → starting → printing`.
+
+**Slicer auf dem Pi (einmalig, nur für STL nötig):** Es braucht einen ARM64-Slicer. Empfohlen: PrusaSlicer-ARM64-Build installieren, dann läuft die Voreinstellung. OrcaSlicer geht auch — dann in `docker-compose.yml` setzen:
+
+```yaml
+environment:
+  - SLICER_CMD=orcaslicer
+  - SLICER_TEMPLATE={cmd} --slice -o {out} --load {machine} --load {filament} --load {process} {input}
+```
+
+Verfügbare Template-Platzhalter: `{cmd} {out} {machine} {filament} {process} {input}` (+ `{overrides}` für Stützen/Infill).
+Profile liegen in `pi_backend/profiles/` (A1-Community-Presets: Düse 300 °C / Bett 100 °C Limits, Start-G-Code wird aus `filaments.json` gerendert) und sind bewusst als Startpunkt zum Tunen gedacht.
+Der G-Code landet per FTP (Port 22, Fallback 21, User `bblp`) auf der Drucker-SD und wird per `gcode_file`-MQTT-Befehl gestartet.
 
 ## Entwicklung
 

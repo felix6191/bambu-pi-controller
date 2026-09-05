@@ -120,6 +120,100 @@ struct SpeedLevelInfo: Codable, Identifiable {
     let percent: Int
 }
 
+// MARK: - File pipeline (STL → G-code → print)
+
+enum JobStage: String, Codable {
+    case uploaded, queued, slicing, sliced, uploading, starting, printing, done, failed
+
+    var displayName: String {
+        switch self {
+        case .uploaded: return "Hochgeladen"
+        case .queued: return "In Warteschlange"
+        case .slicing: return "Wird gesliced"
+        case .sliced: return "Bereit"
+        case .uploading: return "Wird übertragen"
+        case .starting: return "Startet"
+        case .printing: return "Druckt"
+        case .done: return "Fertig"
+        case .failed: return "Fehlgeschlagen"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .uploaded: return "tray.and.arrow.down.fill"
+        case .queued: return "clock.fill"
+        case .slicing: return "cpu.fill"
+        case .sliced: return "checkmark.seal.fill"
+        case .uploading: return "arrow.up.circle.fill"
+        case .starting: return "play.circle.fill"
+        case .printing: return "printer.filled.and.paper"
+        case .done: return "checkmark.circle.fill"
+        case .failed: return "exclamationmark.triangle.fill"
+        }
+    }
+
+    var isBusy: Bool { [.queued, .slicing, .uploading, .starting, .printing].contains(self) }
+}
+
+struct SliceJob: Codable, Identifiable {
+    let id: String
+    let filename: String
+    let sizeBytes: Int
+    let stage: JobStage
+    let progress: Double
+    let filament: String
+    let quality: String
+    let supports: Bool
+    let infill: Int
+    let gcodeName: String
+    let error: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, filename, stage, progress, filament, quality, supports, infill, error
+        case sizeBytes = "size_bytes"
+        case gcodeName = "gcode_name"
+    }
+
+    var sizeText: String {
+        let mb = Double(sizeBytes) / 1_048_576
+        return mb >= 1 ? String(format: "%.1f MB", mb) : "\(max(1, sizeBytes / 1024)) KB"
+    }
+}
+
+struct JobList: Codable { let jobs: [SliceJob] }
+
+struct SliceParams: Codable {
+    var filament: String = "pla"
+    var quality: String = "standard"
+    var supports: Bool = false
+    var infill: Int = 15
+}
+
+struct FilamentInfo: Codable {
+    let name: String
+    let nozzle: Int
+    let bed: Int
+    let note: String?
+}
+
+struct QualityInfo: Codable {
+    let name: String
+    let layerMm: Double
+    let note: String
+
+    enum CodingKeys: String, CodingKey {
+        case name, note
+        case layerMm = "layer_mm"
+    }
+}
+
+struct ProfilesResponse: Codable {
+    let filaments: [String: FilamentInfo]
+    let qualities: [String: QualityInfo]
+    let slicer: String
+}
+
 enum PrinterState: String, Codable, CaseIterable {
     case idle = "idle", printing = "printing", paused = "paused", busy = "busy", error = "error", unknown = "unknown"
 

@@ -9,7 +9,7 @@ from loguru import logger
 
 from app.core.config import settings
 from app.core import state as app_state
-from app.api import printer, camera, system
+from app.api import printer, camera, system, files
 
 logger.remove()
 logger.add(sys.stderr, level=settings.log_level.upper())
@@ -90,6 +90,7 @@ async def verify_token_or_query(
 app.include_router(printer.router, prefix="/api/v1/printer", tags=["printer"], dependencies=[Depends(verify_token)])
 app.include_router(camera.router, prefix="/api/v1/camera", tags=["camera"], dependencies=[Depends(verify_token_or_query)])
 app.include_router(system.router, prefix="/api/v1/system", tags=["system"], dependencies=[Depends(verify_token)])
+app.include_router(files.router, prefix="/api/v1/files", tags=["files"], dependencies=[Depends(verify_token)])
 
 
 @app.get("/health")

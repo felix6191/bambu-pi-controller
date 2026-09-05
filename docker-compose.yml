@@ -8,7 +8,10 @@ services:
     env_file:
       - path: ./pi_backend/.env
         required: false
+    volumes:
+      - bambu-data:/data
     environment:
+      - STORAGE_DIR=/data
       - PRINTER_HOST=${PRINTER_HOST}
       - PRINTER_SERIAL=${PRINTER_SERIAL}
       - PRINTER_ACCESS_CODE=${PRINTER_ACCESS_CODE}
@@ -17,6 +20,8 @@ services:
       - CAMERA_USERNAME=${CAMERA_USERNAME}
       - CAMERA_PASSWORD=${CAMERA_PASSWORD}
       - LOG_LEVEL=INFO
+      - SLICER_CMD=${SLICER_CMD}
+      - MAX_UPLOAD_MB=${MAX_UPLOAD_MB:-200}
     ports:
       - "8000:8000"
     networks:
@@ -47,3 +52,4 @@ networks:
 
 volumes:
   tailscale-state:
+  bambu-data:

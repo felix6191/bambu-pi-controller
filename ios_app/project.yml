@@ -34,11 +34,27 @@ targets:
       testTargets: []
       gatherCoverageData: false
 
+  ShareExtension:
+    type: app-extension
+    platform: iOS
+    bundleIdSuffix: .share
+    sources:
+      - path: ShareExtension
+        excludes:
+          - Info.plist
+    info:
+      path: ShareExtension/Info.plist
+    settings:
+      base:
+        INFOPLIST_FILE: ShareExtension/Info.plist
+        CODE_SIGN_STYLE: Automatic
+
 schemes:
   BambuController:
     build:
       targets:
         BambuController: all
+        ShareExtension: all
     run:
       config: Debug
       executable: BambuController

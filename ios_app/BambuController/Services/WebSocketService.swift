@@ -18,6 +18,7 @@ class WebSocketService: ObservableObject {
 
     var onStatusUpdate: (@MainActor (PrinterStatus) -> Void)?
     var onEvent: (@MainActor (WSMessage) -> Void)?
+    var onJob: (@MainActor (SliceJob) -> Void)?
 
     private init() {}
 
@@ -69,6 +70,9 @@ class WebSocketService: ObservableObject {
         }
     }
 
+    private struct TypeOnly: Codable { let type: String }
+    private struct JobEnvelope: Codable { let type: String; let data: SliceJob }
+
     private func handle(_ message: URLSessionWebSocketTask.Message) {
         let text: String
         switch message {
@@ -77,11 +81,17 @@ class WebSocketService: ObservableObject {
         @unknown default: return
         }
         guard let data = text.data(using: .utf8),
-              let ws = try? JSONDecoder().decode(WSMessage.self, from: data) else { return }
+              let kind = try? JSONDecoder().decode(TypeOnly.self, from: data) else { return }
 
+        if kind.type == "job" {
+            if let env = try? JSONDecoder().decode(JobEnvelope.self, from: data) {
+                onJob?(env.data)
+            }
+            return
+        }
+        guard let ws = try? JSONDecoder().decode(WSMessage.self, from: data) else { return }
         if ws.type == "status", let d = ws.data {
-            let status = parseStatus(d)
-            onStatusUpdate?(status)
+            onStatusUpdate?(parseStatus(d))
         } else if ws.type == "event" {
             onEvent?(ws)
         }

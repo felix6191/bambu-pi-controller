@@ -88,6 +88,18 @@ install_tailscale() {
     ok "Tailscale installiert"
 }
 
+check_slicer() {
+    # Optional: STL→G-Code direkt auf dem Pi (ARM64-Build nötig, kein Pflichtprogramm)
+    if command -v prusa-slicer &>/dev/null || command -v prusa_slicer &>/dev/null || command -v orcaslicer &>/dev/null || command -v bambustudio &>/dev/null; then
+        ok "Slicer gefunden — STL-Druck aus der App funktioniert"
+    else
+        warn "Kein Slicer auf dem Pi (nötig für STL→G-Code in der App)."
+        echo "  Später nachholen: ARM64-Build von PrusaSlicer/OrcaSlicer installieren,"
+        echo "  ggf. SLICER_CMD/SLICER_TEMPLATE in docker-compose.yml anpassen (siehe README)."
+        echo "  Ohne Slicer gehen trotzdem: Status, Steuerung, Kamera + SD-Dateien starten."
+    fi
+}
+
 setup_user_repo() {
     title "Schritt 2/5 · Programmdateien holen"
     if ! id "$SERVICE_USER" &>/dev/null; then
@@ -405,6 +417,7 @@ main() {
     setup_user_repo
     wizard
     setup_tailscale
+    check_slicer
     deploy
     print_summary
 }
