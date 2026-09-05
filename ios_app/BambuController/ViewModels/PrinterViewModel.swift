@@ -18,6 +18,9 @@ class PrinterViewModel: ObservableObject {
     /// Command callback UI: which commands are in flight + last verified result
     @Published var pending: Set<String> = []
     @Published var feedback: CommandFeedback?
+    /// Rolling temperature history for the chart (max ~6 min at live rate)
+    @Published var tempHistory: [TempSample] = []
+    private var lastSampleAt = Date.distantPast
 
     var isDemo: Bool { AppSettings.shared.demoMode }
 
@@ -26,9 +29,9 @@ class PrinterViewModel: ObservableObject {
     private let demo = DemoService.shared
 
     private init() {
-        ws.onStatusUpdate = { [weak self] s in self?.status = s }
+        ws.onStatusUpdate = { [weak self] s in self?.status = s; self?.recordHistory(s) }
         ws.onEvent = { [weak self] e in self?.handleEvent(e) }
-        demo.onStatusUpdate = { [weak self] s in self?.status = s }
+        demo.onStatusUpdate = { [weak self] s in self?.status = s; self?.recordHistory(s) }
         if AppSettings.shared.demoMode {
             demo.start()
         } else if AppSettings.shared.autoConnect && !AppSettings.shared.serverURL.isEmpty {
@@ -72,14 +75,23 @@ class PrinterViewModel: ObservableObject {
     func clampedFlow(_ f: Int) -> Int { limits.clampFlow(f) }
 
     func loadStatus() async {
-        if isDemo { status = demo.status; return }
+        if isDemo { status = demo.status; recordHistory(demo.status); return }
         isLoading = true; errorMessage = nil
         do {
             let s = try await api.getStatus()
-            status = s
+            status = s; recordHistory(s)
         }
         catch { errorMessage = error.localizedDescription; showError = true }
         isLoading = false
+    }
+
+    private func recordHistory(_ s: PrinterStatus) {
+        // Throttle: one sample per ~4 s keeps the chart smooth without flooding
+        guard Date().timeIntervalSince(lastSampleAt) >= 4 else { return }
+        lastSampleAt = Date()
+        tempHistory.append(TempSample(date: Date(), nozzle: s.nozzleTemp, bed: s.bedTemp,
+            nozzleTarget: s.nozzleTargetTemp, bedTarget: s.bedTargetTemp))
+        if tempHistory.count > 90 { tempHistory.removeFirst(tempHistory.count - 90) }
     }
 
     func startPrint(filename: String, bedTemp: Int = 0, nozzleTemp: Int = 0) async {
@@ -145,7 +157,7 @@ class PrinterViewModel: ObservableObject {
 
     private func loadStatusQuiet() async {
         if isDemo { status = demo.status; return }
-        if let s = try? await api.getStatus() { status = s }
+        if let s = try? await api.getStatus() { status = s; recordHistory(s) }
     }
 
     func setNozzleTemperature(_ temp: Int) async -> Bool {
@@ -198,4 +210,14 @@ class PrinterViewModel: ObservableObject {
         if isDemo { return }
         ws.disconnect(); ws.connect()
     }
+}
+
+/// One temperature sample for the history chart
+struct TempSample: Identifiable {
+    let id = UUID()
+    let date: Date
+    let nozzle: Double
+    let bed: Double
+    let nozzleTarget: Double
+    let bedTarget: Double
 }

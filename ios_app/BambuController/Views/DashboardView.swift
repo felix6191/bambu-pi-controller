@@ -13,6 +13,7 @@ struct DashboardView: View {
                     if let fb = vm.feedback { FeedbackBanner(feedback: fb) }
                     headerRow
                     PrinterDiagramView(status: vm.status).card()
+                    TempChartCard(history: vm.tempHistory)
                     statGrid
                     if let s = vm.status, s.state == .printing || s.state == .paused {
                         PrintJobCard(status: s)
@@ -40,6 +41,7 @@ struct DashboardView: View {
                 Image(systemName: "printer.fill")
                     .font(.title2)
                     .foregroundColor(.primary)
+                    .symbolEffect(.bounce, value: vm.status?.state)
             }
             .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
@@ -249,7 +251,13 @@ struct LivePill: View {
     let live: Bool
     var body: some View {
         HStack(spacing: 5) {
-            Circle().fill(live ? Color.green : Color.gray).frame(width: 7, height: 7)
+            if live {
+                Circle().fill(Color.green).frame(width: 7, height: 7)
+                    .phaseAnimator([0.35, 1.0]) { dot, phase in dot.opacity(phase) }
+                    animation: { _ in .easeInOut(duration: 1.1).repeatForever(autoreverses: true) }
+            } else {
+                Circle().fill(Color.gray).frame(width: 7, height: 7)
+            }
             Text(live ? "Live" : "Offline").font(.caption2).fontWeight(.bold)
         }
         .padding(.horizontal, 8).padding(.vertical, 4)

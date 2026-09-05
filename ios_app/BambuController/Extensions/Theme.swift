@@ -91,6 +91,8 @@ struct StatCard: View {
                     .monospacedDigit()
                     .foregroundColor(tint)
                     .minimumScaleFactor(0.7)
+                    .contentTransition(.numericText())
+                    .animation(.spring(response: 0.4, dampingFraction: 0.8), value: value)
                 Text(unit)
                     .font(.callout).foregroundColor(.secondary)
             }
