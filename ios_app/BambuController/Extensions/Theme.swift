@@ -32,17 +32,112 @@ extension View {
     func card() -> some View { modifier(Card()) }
 }
 
-/// Primary filled button
+/// Primary filled button — monochrome adaptive (black in light, white in dark),
+/// like premium companion apps. Accent green stays reserved for status/success.
+/// Pass `color` only for semantic cases (e.g. destructive red).
 struct PrimaryButtonStyle: ButtonStyle {
-    var color: Color = AppTheme.accent
+    var color: Color? = nil
     func makeBody(configuration: Configuration) -> some View {
+        let bg = color ?? Color.primary
+        let fg: Color = color == nil ? Color(.systemBackground) : .white
         configuration.label
             .font(.headline)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 14)
-            .background(color.opacity(configuration.isPressed ? 0.7 : 1))
-            .foregroundColor(.white)
+            .background(bg.opacity(configuration.isPressed ? 0.7 : 1))
+            .foregroundColor(fg)
             .cornerRadius(AppTheme.controlRadius)
+    }
+}
+
+/// Circular icon button on a soft raised disc (notification/gear style)
+struct CircleIconButton: View {
+    let systemImage: String
+    let tint: Color
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.body).fontWeight(.medium)
+                .foregroundColor(tint)
+                .frame(width: 44, height: 44)
+                .background(Color(.secondarySystemGroupedBackground))
+                .clipShape(Circle())
+                .shadow(color: .black.opacity(0.12), radius: 6, x: 0, y: 3)
+        }
+        .buttonStyle(.plain)
+        .contentShape(Circle())
+    }
+}
+
+/// Big-metric stat card (icon + caption on top, huge value + unit, footnote below)
+struct StatCard: View {
+    let icon: String
+    let caption: String
+    let value: String
+    let unit: String
+    let footnote: String
+    var tint: Color = .primary
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 5) {
+                Image(systemName: icon).font(.caption).foregroundColor(.secondary)
+                Text(caption).font(.caption).foregroundColor(.secondary)
+            }
+            .accessibilityHidden(true)
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                Text(value)
+                    .font(.system(size: 30, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundColor(tint)
+                    .minimumScaleFactor(0.7)
+                Text(unit)
+                    .font(.callout).foregroundColor(.secondary)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("\(caption): \(value) \(unit). \(footnote)")
+            Text(footnote)
+                .font(.caption2).foregroundColor(.secondary)
+                .lineLimit(1).minimumScaleFactor(0.8)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: AppTheme.cardRadius, style: .continuous)
+                .fill(Color(.secondarySystemGroupedBackground))
+                .shadow(color: .black.opacity(0.10), radius: 8, x: 0, y: 3)
+        )
+    }
+}
+
+/// Progress ring with centered value (hero-metric style)
+struct RingGauge: View {
+    let fraction: Double // 0...1
+    let valueText: String
+    let caption: String
+    var tint: Color = AppTheme.accent
+    var size: CGFloat = 92
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(Color(.systemGray5), lineWidth: 10)
+                .frame(width: size, height: size)
+            Circle()
+                .trim(from: 0, to: min(max(fraction, 0), 1))
+                .stroke(tint, style: StrokeStyle(lineWidth: 10, lineCap: .round))
+                .frame(width: size, height: size)
+                .rotationEffect(.degrees(-90))
+                .animation(.easeInOut(duration: 0.5), value: fraction)
+            VStack(spacing: 0) {
+                Text(valueText)
+                    .font(.system(size: 22, weight: .bold, design: .rounded))
+                    .monospacedDigit().minimumScaleFactor(0.7)
+                Text(caption)
+                    .font(.caption2).foregroundColor(.secondary)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(caption): \(valueText)")
     }
 }
 

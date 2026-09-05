@@ -54,7 +54,7 @@ struct OnboardingView: View {
             if step < totalSteps - 1 {
                 Button("Weiter") { withAnimation { step += 1 } }
                     .buttonStyle(.borderedProminent)
-                    .tint(AppTheme.accent)
+                    .tint(.primary)
                     .disabled(!stepValid)
             }
         }
@@ -77,9 +77,11 @@ struct OnboardingView: View {
                     .font(.system(size: 72))
                     .foregroundColor(AppTheme.accent)
                     .padding(.top, 24)
-                Text("BambuController")
-                    .font(.largeTitle).fontWeight(.bold)
-                Text("Dein Bambu Lab A1 — von überall im Blick und unter Kontrolle.")
+                Text("Dein A1.\nÜberall im Griff.")
+                    .font(.system(.largeTitle, design: .serif)).fontWeight(.bold)
+                    .multilineTextAlignment(.center)
+                Text("BambuController verbindet deinen Bambu Lab A1 mit deinem iPhone — zuhause wie unterwegs.")
+                    .font(.body).foregroundColor(.secondary)
                     .font(.body).foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal)
@@ -129,7 +131,7 @@ struct OnboardingView: View {
                     if printerSending { ProgressView().frame(maxWidth: .infinity) }
                     else { Text("An Pi senden & verbinden").frame(maxWidth: .infinity) }
                 }
-                .buttonStyle(.borderedProminent).tint(AppTheme.accent)
+                .buttonStyle(.borderedProminent).tint(.primary)
                 .disabled(printerHost.isEmpty || printerSerial.isEmpty || printerCode.isEmpty || printerSending
                     || settings.serverURL.isEmpty || settings.apiToken.isEmpty)
                 if let r = printerResult {
@@ -176,7 +178,7 @@ struct OnboardingView: View {
                     if testing { ProgressView().frame(maxWidth: .infinity) }
                     else { Text("Verbindung testen").frame(maxWidth: .infinity) }
                 }
-                .buttonStyle(.borderedProminent).tint(AppTheme.accent)
+                .buttonStyle(.borderedProminent).tint(.primary)
                 .disabled(settings.serverURL.isEmpty || settings.apiToken.isEmpty || testing)
                 if let r = testResult {
                     Text(r).font(.footnote).foregroundColor(r.hasPrefix("✅") ? .green : .red)
@@ -307,9 +309,18 @@ private struct ModeCard: View {
                     .foregroundColor(selected ? AppTheme.accent : .secondary)
             }
             .padding()
-            .overlay(RoundedRectangle(cornerRadius: AppTheme.cardRadius).stroke(selected ? AppTheme.accent : Color(.systemGray4), lineWidth: selected ? 2 : 1))
+            .background(
+                RoundedRectangle(cornerRadius: AppTheme.cardRadius, style: .continuous)
+                    .fill(selected ? AppTheme.accent.opacity(0.08) : Color.clear)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: AppTheme.cardRadius, style: .continuous)
+                    .stroke(style: StrokeStyle(lineWidth: selected ? 2 : 1.2, dash: selected ? [] : [7, 5]))
+                    .foregroundColor(selected ? AppTheme.accent : Color(.systemGray3))
+            )
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("\(title)\(selected ? ", ausgewählt" : "")")
     }
 }
 

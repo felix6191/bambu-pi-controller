@@ -1,4 +1,5 @@
-// DashboardView.swift - Main dashboard with printer status overview
+// DashboardView.swift - Home in premium companion-app style:
+// header row, hero diagram, 2x2 stat cards with big metrics, job card, actions.
 import SwiftUI
 
 struct DashboardView: View {
@@ -10,81 +11,147 @@ struct DashboardView: View {
             ScrollView {
                 VStack(spacing: 16) {
                     if let fb = vm.feedback { FeedbackBanner(feedback: fb) }
-                    PrinterStatusCard(status: vm.status, live: ws.isConnected)
+                    headerRow
                     PrinterDiagramView(status: vm.status).card()
-                    if let s = vm.status { TemperatureCard(status: s) }
-                    if let s = vm.status, s.state == .printing || s.state == .paused { PrintJobCard(status: s) }
+                    statGrid
+                    if let s = vm.status, s.state == .printing || s.state == .paused {
+                        PrintJobCard(status: s)
+                    }
                     QuickActionsCard()
-                    Spacer(minLength: 100)
+                    Spacer(minLength: 90)
                 }.padding()
             }
             .navigationTitle("Bambu A1")
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    if vm.isDemo { Pill(text: "DEMO", color: .purple) }
-                }
-                ToolbarItem(placement: .navigationBarTrailing) { ConnectionIndicator(connected: vm.isDemo || (ws.isConnected && vm.status != nil)) }
-            }
+            .navigationBarTitleDisplayMode(.large)
             .refreshable { await vm.loadStatus() }
             .alert("Fehler", isPresented: $vm.showError, presenting: vm.errorMessage) { _ in Button("OK", role: .cancel) {} } message: { Text($0) }
         }
+    }
+
+    // MARK: - Header (avatar + name left, live + light right)
+
+    private var headerRow: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(Color(.secondarySystemGroupedBackground))
+                    .frame(width: 52, height: 52)
+                    .shadow(color: .black.opacity(0.12), radius: 6, x: 0, y: 3)
+                Image(systemName: "printer.fill")
+                    .font(.title2)
+                    .foregroundColor(.primary)
+            }
+            .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Bambu Lab A1")
+                    .font(.title3).fontWeight(.bold)
+                Text(vm.status?.state.displayName ?? "Verbinde …")
+                    .font(.subheadline).foregroundColor(.secondary)
+            }
+            Spacer()
+            VStack(alignment: .trailing, spacing: 6) {
+                HStack(spacing: 6) {
+                    if vm.isDemo { Pill(text: "Demo", color: .purple) }
+                    LivePill(live: vm.isDemo || (ws.isConnected && vm.status != nil))
+                }
+                if let s = vm.status {
+                    WifiSignalView(signal: s.wifiSignal)
+                }
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Bambu Lab A1, \(vm.status?.state.displayName ?? "nicht verbunden")")
+    }
+
+    // MARK: - 2x2 stat grid
+
+    private var statGrid: some View {
+        let s = vm.status
+        let progress = s.map { min(max($0.printJob.progress, 0), 100) } ?? 0
+        return VStack(spacing: 12) {
+            HStack(spacing: 12) {
+                // Progress ring card
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Fortschritt").font(.caption).foregroundColor(.secondary)
+                    HStack {
+                        Spacer()
+                        RingGauge(
+                            fraction: progress / 100,
+                            valueText: s == nil ? "–" : "\(Int(progress)) %",
+                            caption: layerCaption
+                        )
+                        Spacer()
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .padding(14)
+                .background(
+                    RoundedRectangle(cornerRadius: AppTheme.cardRadius, style: .continuous)
+                        .fill(Color(.secondarySystemGroupedBackground))
+                        .shadow(color: .black.opacity(0.10), radius: 8, x: 0, y: 3)
+                )
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Fortschritt \(Int(progress)) Prozent, \(layerCaption)")
+
+                StatCard(
+                    icon: "thermometer.high",
+                    caption: "Düse",
+                    value: s.map { "\(Int($0.nozzleTemp))" } ?? "–",
+                    unit: "°C",
+                    footnote: s.map { "Ziel \($0.nozzleTargetTemp.Clean)° · \(heatState($0))" } ?? "Keine Daten",
+                    tint: .orange
+                )
+            }
+            HStack(spacing: 12) {
+                StatCard(
+                    icon: "square.stack.3d.up.fill",
+                    caption: "Druckbett",
+                    value: s.map { "\(Int($0.bedTemp))" } ?? "–",
+                    unit: "°C",
+                    footnote: s.map { "Ziel \($0.bedTargetTemp.Clean)° · \(heatState($0, bed: true))" } ?? "Keine Daten",
+                    tint: .red
+                )
+                StatCard(
+                    icon: "clock.fill",
+                    caption: "Restzeit",
+                    value: s.map { shortRemaining($0) } ?? "–",
+                    unit: "",
+                    footnote: s.map { "Läuft \($0.printJob.formattedElapsed)" } ?? "Kein Druck aktiv",
+                    tint: .primary
+                )
+            }
+        }
+    }
+
+    private var layerCaption: String {
+        guard let s = vm.status, s.printJob.totalLayers > 0 else { return "Bereit" }
+        return "Schicht \(s.printJob.currentLayer)/\(s.printJob.totalLayers)"
+    }
+
+    private func heatState(_ s: PrinterStatus, bed: Bool = false) -> String {
+        let cur = bed ? s.bedTemp : s.nozzleTemp
+        let tgt = bed ? s.bedTargetTemp : s.nozzleTargetTemp
+        if tgt <= 0 { return "Aus" }
+        if tgt - cur > 3 { return "Heizt" }
+        if abs(tgt - cur) <= 3 { return "Bereit" }
+        return "Kühlt ab"
+    }
+
+    private func shortRemaining(_ s: PrinterStatus) -> String {
+        guard s.state == .printing || s.state == .paused else { return "–" }
+        let m = s.printJob.remainingTime / 60, h = m / 60
+        if h > 0 { return "\(h)h \(m % 60)m" }
+        return "\(m)m"
     }
 }
 
 // MARK: - Subviews
 
-struct PrinterStatusCard: View {
-    let status: PrinterStatus?
-    var live: Bool = false
-    private var state: PrinterState { status?.state ?? .unknown }
-
-    var body: some View {
-        VStack(spacing: 12) {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Druckerstatus").font(.caption).foregroundColor(.secondary)
-                    HStack(spacing: 8) {
-                        Image(systemName: state.systemImage).font(.title2).foregroundColor(state.color)
-                        Text(state.displayName).font(.title2).fontWeight(.semibold)
-                    }
-                }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 6) {
-                    if let s = status { WifiSignalView(signal: s.wifiSignal) }
-                    LivePill(live: live)
-                }
-            }
-            if let s = status, s.state == .printing || s.state == .paused {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack { Text("Fortschritt").font(.caption).foregroundColor(.secondary); Spacer(); Text("\(Int(s.progressClamped))%").font(.caption).fontWeight(.medium).monospacedDigit() }
-                    ProgressView(value: s.progressClamped / 100)
-                        .progressViewStyle(LinearProgressViewStyle(tint: .bambuBlue))
-                        .scaleEffect(y: 2)
-                        .animation(.easeInOut(duration: 0.4), value: s.printJob.progress)
-                }
-            } else if status == nil {
-                Text("Noch keine Daten — Server in Einstellungen eintragen und „Verbindung testen“.")
-                    .font(.caption).foregroundColor(.secondary).frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }.modifier(Card())
-    }
-}
-
-private extension PrinterStatus {
-    var progressClamped: Double { Swift.min(Swift.max(0, printJob.progress), 100) }
-}
-
-struct LivePill: View {
-    let live: Bool
-    var body: some View {
-        HStack(spacing: 5) {
-            Circle().fill(live ? Color.green : Color.gray).frame(width: 7, height: 7)
-            Text(live ? "LIVE" : "OFFLINE").font(.caption2).fontWeight(.bold)
-        }
-        .padding(.horizontal, 8).padding(.vertical, 4)
-        .background((live ? Color.green : Color.gray).opacity(0.15))
-        .foregroundColor(live ? .green : .secondary)
-        .clipShape(Capsule())
+private extension Double {
+    /// "220" statt "220.0" für Temperatur-Labels
+    var Clean: String {
+        let i = Int(self)
+        return self == Double(i) ? "\(i)" : String(format: "%.1f", self)
     }
 }
 
@@ -93,35 +160,7 @@ struct WifiSignalView: View {
     var bars: Int { signal == 0 ? 0 : signal >= -50 ? 4 : signal >= -60 ? 3 : signal >= -70 ? 2 : signal >= -80 ? 1 : 0 }
     var body: some View {
         HStack(spacing: 2) { ForEach(0..<4, id: \.self) { i in RoundedRectangle(cornerRadius: 1).fill(i < bars ? Color.green : Color(.systemGray4)).frame(width: 3, height: CGFloat(4 + i * 3)) } }
-    }
-}
-
-struct TemperatureCard: View {
-    let status: PrinterStatus
-    var body: some View {
-        VStack(spacing: 12) {
-            HStack { Text("Temperaturen").font(.headline); Spacer() }
-            HStack(spacing: 20) {
-                TempGauge(label: "Düse", current: status.nozzleTemp, target: status.nozzleTargetTemp, color: .orange)
-                TempGauge(label: "Bett", current: status.bedTemp, target: status.bedTargetTemp, color: .red)
-                TempGauge(label: "Kammer", current: status.chamberTemp, target: 0, color: .purple)
-            }
-        }.modifier(Card())
-    }
-}
-
-struct TempGauge: View {
-    let label: String; let current: Double; let target: Double; let color: Color
-    private var fraction: Double { target > 0 ? Swift.min(Swift.max(0, current / target), 1) : 0 }
-    var body: some View {
-        VStack(spacing: 8) {
-            Text(label).font(.caption).foregroundColor(.secondary)
-            ZStack {
-                Circle().stroke(Color(.systemGray5), lineWidth: 8).frame(width: 70, height: 70)
-                Circle().trim(from: 0, to: fraction).stroke(color, style: StrokeStyle(lineWidth: 8, lineCap: .round)).frame(width: 70, height: 70).rotationEffect(.degrees(-90)).animation(.easeInOut(duration: 0.5), value: current)
-                VStack(spacing: 2) { Text("\(Int(current))°").font(.title3).fontWeight(.bold).monospacedDigit(); if target > 0 { Text("/ \(Int(target))°").font(.caption2).foregroundColor(.secondary).monospacedDigit() } }
-            }
-        }.frame(maxWidth: .infinity)
+            .accessibilityLabel(signal == 0 ? "WLAN unbekannt" : "WLAN-Signal \(signal) dBm")
     }
 }
 
@@ -132,18 +171,23 @@ struct PrintJobCard: View {
             HStack {
                 Text("Aktueller Druck").font(.headline)
                 Spacer()
-                Text(status.state == .paused ? "Pausiert" : "Druckt").font(.caption).fontWeight(.bold).padding(.horizontal, 8).padding(.vertical, 4).background(status.state == .paused ? Color.orange : Color.blue).foregroundColor(.white).cornerRadius(8)
+                Text(status.state == .paused ? "Pausiert" : "Druckt")
+                    .font(.caption).fontWeight(.bold)
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(status.state == .paused ? Color.orange : Color.blue)
+                    .foregroundColor(.white).cornerRadius(8)
             }
-            Text(status.printJob.name.isEmpty ? "Unbekannte Datei" : status.printJob.name).font(.title3).fontWeight(.medium).lineLimit(1)
+            Text(status.printJob.name.isEmpty ? "Unbekannte Datei" : status.printJob.name)
+                .font(.title3).fontWeight(.medium).lineLimit(1)
             HStack(spacing: 24) {
-                InfoItem(label: "Layer", value: "\(status.printJob.currentLayer) / \(status.printJob.totalLayers)")
                 InfoItem(label: "Verstrichen", value: status.printJob.formattedElapsed)
                 InfoItem(label: "Verbleibend", value: status.printJob.formattedRemaining)
+                InfoItem(label: "Lüfter", value: "\(status.fanSpeed) %")
             }
             if !status.printJob.filamentType.isEmpty {
                 HStack { Image(systemName: "circle.fill").foregroundColor(filamentColor(status.printJob.filamentColor)); Text("\(status.printJob.filamentType) - \(status.printJob.filamentColor)").font(.caption).foregroundColor(.secondary) }
             }
-        }.modifier(Card())
+        }.card()
     }
     private func filamentColor(_ n: String) -> Color {
         let l = n.lowercased()
@@ -174,7 +218,7 @@ struct QuickActionsCard: View {
         VStack(spacing: 12) {
             Text("Schnellzugriff").font(.headline).frame(maxWidth: .infinity, alignment: .leading)
             HStack(spacing: 12) {
-                QuickActionButton(title: vm.status?.state == .printing ? "Pause" : "Drucken", icon: vm.status?.state == .printing ? "pause.fill" : "play.fill", color: vm.status?.state == .printing ? .orange : .green) {
+                QuickActionButton(title: vm.status?.state == .printing ? "Pause" : "Drucken", icon: vm.status?.state == .printing ? "pause.fill" : "play.fill", color: vm.status?.state == .printing ? .orange : AppTheme.accent) {
                     if vm.status?.state == .printing { Task { await vm.pausePrint() } } else { showPrint = true }
                 }
                 if vm.status?.state == .paused {
@@ -184,7 +228,7 @@ struct QuickActionsCard: View {
                     QuickActionButton(title: "Stopp", icon: "stop.fill", color: .red) { confirmStop = true }
                 }
             }
-        }.modifier(Card())
+        }.card()
         .sheet(isPresented: $showPrint) { PrintStartSheet() }
         .alert("Druck wirklich stoppen?", isPresented: $confirmStop) {
             Button("Abbrechen", role: .cancel) {}
@@ -197,12 +241,22 @@ struct QuickActionButton: View {
     let title, icon: String; let color: Color; let action: () -> Void
     var body: some View {
         Button(action: action) { VStack(spacing: 8) { Image(systemName: icon).font(.title2); Text(title).font(.caption).fontWeight(.medium) }.frame(maxWidth: .infinity).padding(.vertical, 16).background(color.opacity(0.15)).foregroundColor(color).cornerRadius(12) }
+            .accessibilityLabel(title)
     }
 }
 
-struct ConnectionIndicator: View {
-    let connected: Bool
-    var body: some View { HStack(spacing: 4) { Circle().fill(connected ? Color.green : Color.red).frame(width: 8, height: 8); Text(connected ? "Verbunden" : "Getrennt").font(.caption).foregroundColor(.secondary) } }
+struct LivePill: View {
+    let live: Bool
+    var body: some View {
+        HStack(spacing: 5) {
+            Circle().fill(live ? Color.green : Color.gray).frame(width: 7, height: 7)
+            Text(live ? "Live" : "Offline").font(.caption2).fontWeight(.bold)
+        }
+        .padding(.horizontal, 8).padding(.vertical, 4)
+        .background((live ? Color.green : Color.gray).opacity(0.15))
+        .foregroundColor(live ? .green : .secondary)
+        .clipShape(Capsule())
+    }
 }
 
 #Preview("Dashboard") { DashboardView().environmentObject(AppState.shared) }

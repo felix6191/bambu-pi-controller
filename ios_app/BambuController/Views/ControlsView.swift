@@ -212,7 +212,7 @@ struct TemperatureControlSection: View {
                 if busy { ProgressView().frame(maxWidth: .infinity) }
                 else { Text(busy ? "Wird geprüft…" : "Übernehmen").frame(maxWidth: .infinity) }
             }
-            .buttonStyle(PrimaryButtonStyle(color: color))
+            .buttonStyle(PrimaryButtonStyle())
             .disabled(busy)
         }.card()
     }
@@ -256,7 +256,7 @@ struct SliderControlSection: View {
                 if busy { ProgressView().frame(maxWidth: .infinity) }
                 else { Text("Anwenden").frame(maxWidth: .infinity) }
             }
-            .buttonStyle(PrimaryButtonStyle(color: color))
+            .buttonStyle(PrimaryButtonStyle())
             .disabled(busy)
         }.card()
     }
