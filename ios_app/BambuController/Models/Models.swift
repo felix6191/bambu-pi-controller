@@ -166,5 +166,12 @@ struct AppSettings: Codable {
     func save() { if let d = try? JSONEncoder().encode(self) { UserDefaults.standard.set(d, forKey: "AppSettings") } }
 
     var baseURL: String { serverURL.hasSuffix("/") ? String(serverURL.dropLast()) : serverURL }
-    var wsURL: String { baseURL.replacingOccurrences(of: "http", with: "ws") + "/ws?token=\(apiToken)" }
+    var wsURL: String {
+        guard !baseURL.isEmpty else { return "" }
+        var url = baseURL
+        if url.hasPrefix("https://") { url = url.replacingOccurrences(of: "https://", with: "wss://") }
+        else if url.hasPrefix("http://") { url = url.replacingOccurrences(of: "http://", with: "ws://") }
+        else { url = "ws://" + url }
+        return url + "/ws?token=\(apiToken)"
+    }
 }
