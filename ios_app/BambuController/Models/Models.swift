@@ -216,7 +216,13 @@ struct PrintStartRequest: Codable {
     var nozzleTemp: Int
     enum CodingKeys: String, CodingKey { case filename; case bedTemp = "bed_temp"; case nozzleTemp = "nozzle_temp" }
 }
-struct APIResponse: Codable { let success: Bool }
+struct APIResponse: Codable {
+    let success: Bool
+    let verified: Bool?
+    let via: String?
+    var isVerified: Bool { success && (verified ?? true) }
+    var needsAttention: Bool { success && !(verified ?? true) }
+}
 
 // MARK: - WebSocket Messages
 

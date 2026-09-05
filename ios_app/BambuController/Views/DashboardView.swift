@@ -9,7 +9,9 @@ struct DashboardView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
+                    if let fb = vm.feedback { FeedbackBanner(feedback: fb) }
                     PrinterStatusCard(status: vm.status, live: ws.isConnected)
+                    PrinterDiagramView(status: vm.status).card()
                     if let s = vm.status { TemperatureCard(status: s) }
                     if let s = vm.status, s.state == .printing || s.state == .paused { PrintJobCard(status: s) }
                     QuickActionsCard()

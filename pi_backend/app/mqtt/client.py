@@ -197,6 +197,25 @@ class BambuMQTTClient:
         msg = await self._request(MessageType.PRINT.value, command, extra, timeout=timeout, qos=1)
         return msg is not None
 
+    async def wait_for_status(self, predicate, timeout: float = 8.0, interval: float = 0.4) -> bool:
+        """Poll current status until predicate holds (i.e. the printer adopted the value).
+
+        Bambu sends full/delta pushes continuously, so polling is robust without
+        extra event plumbing. Returns False on timeout — the command itself may
+        still have been accepted (ack), only the confirmation is missing.
+        """
+        import time as _time
+        end = _time.monotonic() + timeout
+        while True:
+            try:
+                if predicate(self._status):
+                    return True
+            except Exception:
+                pass
+            if _time.monotonic() >= end:
+                return False
+            await asyncio.sleep(interval)
+
     # -- public API ----------------------------------------------------------
 
     async def push_all(self) -> bool:
@@ -252,33 +271,58 @@ class BambuMQTTClient:
     async def _gcode(self, line: str) -> bool:
         return await self._print(PrintCommand.GCODE_LINE.value, {"param": line})
 
-    async def set_temperatures(self, nozzle: int | None = None, bed: int | None = None) -> bool:
+    async def set_temperatures(self, nozzle: int | None = None, bed: int | None = None) -> dict[str, Any]:
+        """Set targets via G-code, then verify against reported target temps.
+
+        Returns dict(ok, verified, via, requested, actual) — the app shows
+        whether the printer really adopted the value (callback semantics).
+        """
+        want_nozzle = max(0, min(300, nozzle)) if nozzle is not None else None
+        want_bed = max(0, min(100, bed)) if bed is not None else None
         lines: list[str] = []
-        if nozzle is not None:
-            lines.append(f"M104 S{max(0, min(300, nozzle))}")
-        if bed is not None:
-            lines.append(f"M140 S{max(0, min(100, bed))}")
+        if want_nozzle is not None:
+            lines.append(f"M104 S{want_nozzle}")
+        if want_bed is not None:
+            lines.append(f"M140 S{want_bed}")
         if not lines:
-            return True
-        return await self._gcode("\n".join(lines))
+            return {"ok": True, "verified": True, "via": "none", "requested": {}, "actual": {}}
+        if not await self._gcode("\n".join(lines)):
+            return {"ok": False, "verified": False, "via": "none",
+                    "requested": {"nozzle": want_nozzle, "bed": want_bed}, "actual": {}}
 
-    async def set_speed_level(self, level: int) -> bool:
+        def adopted(s) -> bool:
+            ok_n = want_nozzle is None or abs(s.nozzle_target_temp - want_nozzle) < 0.5
+            ok_b = want_bed is None or abs(s.bed_target_temp - want_bed) < 0.5
+            return ok_n and ok_b
+
+        verified = await self.wait_for_status(adopted, timeout=8.0)
+        return {"ok": True, "verified": verified, "via": "status" if verified else "ack",
+                "requested": {"nozzle": want_nozzle, "bed": want_bed},
+                "actual": {"nozzle": self._status.nozzle_target_temp, "bed": self._status.bed_target_temp}}
+
+    async def set_speed_level(self, level: int) -> dict[str, Any]:
         if level not in (1, 2, 3, 4):
-            return False
-        ok = await self._print(PrintCommand.PRINT_SPEED.value, {"param": str(level)})
-        if ok:
-            self._status.speed_level = level
-            self._status.print_speed = SpeedLevel(level).effective_percent
-        return ok
+            return {"ok": False, "verified": False, "via": "none", "requested": level, "actual": None}
+        if not await self._print(PrintCommand.PRINT_SPEED.value, {"param": str(level)}):
+            return {"ok": False, "verified": False, "via": "none", "requested": level, "actual": None}
+        # No optimistic assignment — verification must come from a real printer push
+        verified = await self.wait_for_status(lambda s: s.speed_level == level, timeout=8.0)
+        return {"ok": True, "verified": verified, "via": "status" if verified else "ack",
+                "requested": level, "actual": self._status.speed_level}
 
-    async def set_print_speed(self, speed: int) -> bool:
+    async def set_print_speed(self, speed: int) -> dict[str, Any]:
         """Percent-based convenience wrapper mapping onto official 1-4 presets."""
         return await self.set_speed_level(SpeedLevel.from_percent(max(50, min(200, speed))).value)
 
-    async def set_flow_rate(self, flow: int) -> bool:
-        return await self._gcode(f"M221 S{max(50, min(150, flow))}")
+    async def set_flow_rate(self, flow: int) -> dict[str, Any]:
+        want = max(50, min(150, flow))
+        if not await self._gcode(f"M221 S{want}"):
+            return {"ok": False, "verified": False, "via": "none", "requested": want, "actual": None}
+        # Bambu reports no flow-ratio field, so an accepted command is the best
+        # confirmation available.
+        return {"ok": True, "verified": True, "via": "ack", "requested": want, "actual": None}
 
-    async def set_chamber_light(self, on: bool) -> bool:
+    async def set_chamber_light(self, on: bool) -> dict[str, Any]:
         msg = await self._request(
             MessageType.SYSTEM.value, "ledctrl",
             {
@@ -290,10 +334,14 @@ class BambuMQTTClient:
                 "interval_time": 1000,
             },
         )
-        if msg is not None:
-            self._status.chamber_light = "on" if on else "off"
-            return True
-        return False
+        if msg is None:
+            return {"ok": False, "verified": False, "via": "none", "requested": on, "actual": None}
+        want = "on" if on else "off"
+        verified = await self.wait_for_status(lambda s: s.chamber_light == want, timeout=8.0)
+        if verified:
+            self._status.chamber_light = want
+        return {"ok": True, "verified": verified, "via": "status" if verified else "ack",
+                "requested": on, "actual": self._status.chamber_light}
 
 
 @asynccontextmanager

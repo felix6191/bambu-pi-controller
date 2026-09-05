@@ -66,3 +66,38 @@ struct HintText: View {
         Text(text).font(.footnote).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
     }
 }
+
+/// One command result shown as a dismissible banner (callback feedback)
+struct CommandFeedback: Identifiable, Equatable {
+    let id = UUID()
+    let title: String
+    let message: String
+    let ok: Bool
+    static func == (lhs: CommandFeedback, rhs: CommandFeedback) -> Bool { lhs.id == rhs.id }
+}
+
+struct FeedbackBanner: View {
+    let feedback: CommandFeedback
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: feedback.ok ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                .font(.title3)
+                .foregroundColor(feedback.ok ? AppTheme.accent : .orange)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(feedback.title).font(.subheadline).fontWeight(.semibold)
+                Text(feedback.message).font(.caption).foregroundColor(.secondary)
+            }
+            Spacer()
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color(.secondarySystemGroupedBackground))
+                .shadow(color: .black.opacity(0.25), radius: 8, x: 0, y: 3)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(feedback.ok ? AppTheme.accent.opacity(0.5) : Color.orange.opacity(0.6), lineWidth: 1)
+        )
+    }
+}

@@ -17,6 +17,7 @@ struct ControlsView: View {
 
     private var formContent: some View {
         VStack(spacing: 16) {
+            if let fb = vm.feedback { FeedbackBanner(feedback: fb) }
             nozzleSection
             bedSection
             speedSection
@@ -43,6 +44,7 @@ struct ControlsView: View {
             maxTemp: vm.limits.maxNozzleTemp,
             color: .orange,
             presets: [0, 190, 210, 230, 250],
+            busy: vm.pending.contains("nozzle"),
             onSet: { temp in Task { await vm.setNozzleTemperature(temp) } }
         )
     }
@@ -55,6 +57,7 @@ struct ControlsView: View {
             maxTemp: vm.limits.maxBedTemp,
             color: .red,
             presets: [0, 50, 60, 65, 80, 100],
+            busy: vm.pending.contains("bed"),
             onSet: { temp in Task { await vm.setBedTemperature(temp) } }
         )
     }
@@ -67,6 +70,7 @@ struct ControlsView: View {
                     Text("Offizielle Bambu-Modi").font(.caption).foregroundColor(.secondary)
                 }
                 Spacer()
+                if vm.pending.contains("speed") { ProgressView() }
                 if let lvl = SpeedPreset.all.first(where: { $0.id == (vm.status?.speedLevel ?? 2) }) {
                     Pill(text: "\(lvl.name) · \(lvl.percent) %", color: .blue)
                 }
@@ -88,6 +92,7 @@ struct ControlsView: View {
             step: 5, unit: "%",
             current: vm.status?.flowRate ?? 100,
             color: .purple,
+            busy: vm.pending.contains("flow"),
             onSet: { flw in Task { await vm.setFlowRate(flw) } }
         )
     }
@@ -156,6 +161,7 @@ struct TemperatureControlSection: View {
     let maxTemp: Int
     let color: Color
     var presets: [Int] = []
+    var busy: Bool = false
     let onSet: (Int) -> Void
 
     private var clamped: Int { Swift.min(Swift.max(0, target), maxTemp) }
@@ -199,8 +205,12 @@ struct TemperatureControlSection: View {
                     }
                 }
             }
-            Button("Übernehmen") { onSet(clamped) }
-                .buttonStyle(PrimaryButtonStyle(color: color))
+            Button { onSet(clamped) } label: {
+                if busy { ProgressView().frame(maxWidth: .infinity) }
+                else { Text(busy ? "Wird geprüft…" : "Übernehmen").frame(maxWidth: .infinity) }
+            }
+            .buttonStyle(PrimaryButtonStyle(color: color))
+            .disabled(busy)
         }.card()
     }
 }
@@ -214,6 +224,7 @@ struct SliderControlSection: View {
     let unit: String
     let current: Int
     let color: Color
+    var busy: Bool = false
     let onSet: (Int) -> Void
 
     var body: some View {
@@ -224,6 +235,7 @@ struct SliderControlSection: View {
                     if !subtitle.isEmpty { Text(subtitle).font(.caption).foregroundColor(.secondary) }
                 }
                 Spacer()
+                if busy { ProgressView() }
                 Text("\(value)\(unit)").font(.system(.body, design: .rounded)).fontWeight(.bold).foregroundColor(color).monospacedDigit()
             }
             Slider(value: Binding(get: { Double(value) }, set: { value = Swift.min(Swift.max(range.lowerBound, Int($0)), range.upperBound) }), in: Double(range.lowerBound)...Double(range.upperBound), step: Double(step)).tint(color)
@@ -234,7 +246,12 @@ struct SliderControlSection: View {
                 Spacer()
                 Text("\(range.upperBound)\(unit)").font(.caption).foregroundColor(.secondary)
             }
-            Button("Anwenden") { onSet(value) }.buttonStyle(PrimaryButtonStyle(color: color))
+            Button { onSet(value) } label: {
+                if busy { ProgressView().frame(maxWidth: .infinity) }
+                else { Text("Anwenden").frame(maxWidth: .infinity) }
+            }
+            .buttonStyle(PrimaryButtonStyle(color: color))
+            .disabled(busy)
         }.card()
     }
 }

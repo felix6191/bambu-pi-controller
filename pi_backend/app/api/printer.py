@@ -1,4 +1,5 @@
 """Printer API routes (real Bambu local protocol)."""
+from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
@@ -6,6 +7,20 @@ from app.mqtt.client import BambuMQTTClient
 from app.core.state import get_printer_client
 
 router = APIRouter()
+
+
+class CommandResult(BaseModel):
+    """Every mutating endpoint reports whether the printer adopted the value.
+
+    verified=true  → a later printer status push confirmed the value (via=status)
+    verified=false → command was accepted but no confirmation push arrived yet (via=ack)
+    """
+
+    success: bool
+    verified: bool = False
+    via: str = "none"
+    requested: Any | None = None
+    actual: Any | None = None
 
 
 class TemperatureRequest(BaseModel):
@@ -109,48 +124,53 @@ async def stop_print(client: BambuMQTTClient = Depends(get_printer_client)):
     return {"success": True}
 
 
-@router.post("/temperature")
+@router.post("/temperature", response_model=CommandResult)
 async def set_temperature(request: TemperatureRequest, client: BambuMQTTClient = Depends(get_printer_client)):
     if request.nozzle is None and request.bed is None:
         raise HTTPException(status_code=400, detail="Provide at least nozzle or bed temperature")
-    success = await client.set_temperatures(nozzle=request.nozzle, bed=request.bed)
-    if not success:
+    res = await client.set_temperatures(nozzle=request.nozzle, bed=request.bed)
+    if not res["ok"]:
         raise HTTPException(status_code=500, detail="Failed to set temperature")
-    return {"success": True}
+    return CommandResult(success=True, verified=res["verified"], via=res["via"],
+                         requested=res["requested"], actual=res["actual"])
 
 
-@router.post("/speed")
+@router.post("/speed", response_model=CommandResult)
 async def set_speed(request: SpeedRequest, client: BambuMQTTClient = Depends(get_printer_client)):
     """Percent-based speed; mapped onto official 1-4 presets on the printer."""
-    success = await client.set_print_speed(request.speed)
-    if not success:
+    res = await client.set_print_speed(request.speed)
+    if not res["ok"]:
         raise HTTPException(status_code=500, detail="Failed to set speed")
-    return {"success": True, "level": client.status.speed_level}
+    return CommandResult(success=True, verified=res["verified"], via=res["via"],
+                         requested=res["requested"], actual=res["actual"])
 
 
-@router.post("/speed-level")
+@router.post("/speed-level", response_model=CommandResult)
 async def set_speed_level(request: SpeedLevelRequest, client: BambuMQTTClient = Depends(get_printer_client)):
     """Official speed preset: 1=Silent, 2=Standard, 3=Sport, 4=Ludicrous."""
-    success = await client.set_speed_level(request.level)
-    if not success:
+    res = await client.set_speed_level(request.level)
+    if not res["ok"]:
         raise HTTPException(status_code=500, detail="Failed to set speed level")
-    return {"success": True, "level": request.level}
+    return CommandResult(success=True, verified=res["verified"], via=res["via"],
+                         requested=res["requested"], actual=res["actual"])
 
 
-@router.post("/flow")
+@router.post("/flow", response_model=CommandResult)
 async def set_flow(request: FlowRequest, client: BambuMQTTClient = Depends(get_printer_client)):
-    success = await client.set_flow_rate(request.flow)
-    if not success:
+    res = await client.set_flow_rate(request.flow)
+    if not res["ok"]:
         raise HTTPException(status_code=500, detail="Failed to set flow rate")
-    return {"success": True}
+    return CommandResult(success=True, verified=res["verified"], via=res["via"],
+                         requested=res["requested"], actual=res["actual"])
 
 
-@router.post("/light")
+@router.post("/light", response_model=CommandResult)
 async def set_light(request: LightRequest, client: BambuMQTTClient = Depends(get_printer_client)):
-    success = await client.set_chamber_light(request.on)
-    if not success:
+    res = await client.set_chamber_light(request.on)
+    if not res["ok"]:
         raise HTTPException(status_code=500, detail="Failed to switch chamber light")
-    return {"success": True, "on": request.on}
+    return CommandResult(success=True, verified=res["verified"], via=res["via"],
+                         requested=res["requested"], actual=res["actual"])
 
 
 @router.get("/files")

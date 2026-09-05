@@ -15,6 +15,9 @@ class PrinterViewModel: ObservableObject {
     @Published var capabilities: Capabilities?
     /// Live printer limits. Defaults to A1; refined from /capabilities when reachable.
     @Published var limits = PrinterLimits.bambuA1
+    /// Command callback UI: which commands are in flight + last verified result
+    @Published var pending: Set<String> = []
+    @Published var feedback: CommandFeedback?
 
     var isDemo: Bool { AppSettings.shared.demoMode }
 
@@ -105,41 +108,88 @@ class PrinterViewModel: ObservableObject {
         catch { errorMessage = error.localizedDescription; showError = true }
     }
 
-    func setNozzleTemperature(_ temp: Int) async {
-        if isDemo { demo.setNozzle(clampedNozzle(temp)); return }
-        do { _ = try await api.setTemperature(nozzle: clampedNozzle(temp), bed: nil) }
-        catch { errorMessage = error.localizedDescription; showError = true }
+    // MARK: - Verified commands (callback: adopted by printer or not?)
+
+    private func track(_ key: String, _ title: String, want: String, work: () async throws -> APIResponse) async -> Bool {
+        pending.insert(key)
+        defer { pending.remove(key) }
+        do {
+            let r = try await work()
+            guard r.success else {
+                publishFeedback(title: title, message: "Vom Drucker abgelehnt.", ok: false)
+                return false
+            }
+            if r.isVerified {
+                publishFeedback(title: title, message: "\(want) übernommen ✓", ok: true)
+            } else {
+                publishFeedback(title: title, message: "\(want) gesendet — Bestätigung steht noch aus, bitte gleich prüfen.", ok: false)
+            }
+            await loadStatusQuiet()
+            return r.isVerified
+        } catch {
+            errorMessage = error.localizedDescription; showError = true
+            return false
+        }
     }
 
-    func setBedTemperature(_ temp: Int) async {
-        if isDemo { demo.setBed(clampedBed(temp)); return }
-        do { _ = try await api.setTemperature(nozzle: nil, bed: clampedBed(temp)) }
-        catch { errorMessage = error.localizedDescription; showError = true }
+    private func publishFeedback(title: String, message: String, ok: Bool) {
+        let fb = CommandFeedback(title: title, message: message, ok: ok)
+        feedback = fb
+        Task {
+            try? await Task.sleep(nanoseconds: 4_500_000_000)
+            if feedback == fb { feedback = nil }
+        }
     }
 
-    func setSpeedLevel(_ level: Int) async {
-        guard (1...4).contains(level) else { return }
-        if isDemo { demo.setSpeedLevel(level); return }
-        do { _ = try await api.setSpeedLevel(level) }
-        catch { errorMessage = error.localizedDescription; showError = true }
+    private func loadStatusQuiet() async {
+        if isDemo { status = demo.status; return }
+        if let s = try? await api.getStatus() { status = s }
     }
 
-    func setPrintSpeed(_ speed: Int) async {
+    func setNozzleTemperature(_ temp: Int) async -> Bool {
+        let want = clampedNozzle(temp)
+        if isDemo { demo.setNozzle(want); publishFeedback(title: "Düse", message: "\(want)° übernommen ✓", ok: true); return true }
+        return await track("nozzle", "Düse", want: "\(want)°") {
+            try await api.setTemperature(nozzle: want, bed: nil)
+        }
+    }
+
+    func setBedTemperature(_ temp: Int) async -> Bool {
+        let want = clampedBed(temp)
+        if isDemo { demo.setBed(want); publishFeedback(title: "Druckbett", message: "\(want)° übernommen ✓", ok: true); return true }
+        return await track("bed", "Druckbett", want: "\(want)°") {
+            try await api.setTemperature(nozzle: nil, bed: want)
+        }
+    }
+
+    func setSpeedLevel(_ level: Int) async -> Bool {
+        guard (1...4).contains(level) else { return false }
+        let name = SpeedPreset.all.first(where: { $0.id == level })?.name ?? "\(level)"
+        if isDemo { demo.setSpeedLevel(level); publishFeedback(title: "Geschwindigkeit", message: "\(name) übernommen ✓", ok: true); return true }
+        return await track("speed", "Geschwindigkeit", want: name) {
+            try await api.setSpeedLevel(level)
+        }
+    }
+
+    func setPrintSpeed(_ speed: Int) async -> Bool {
         // Map percent onto the official preset ladder
         let lvl = speed <= 62 ? 1 : speed <= 112 ? 2 : speed <= 137 ? 3 : 4
-        await setSpeedLevel(lvl)
+        return await setSpeedLevel(lvl)
     }
 
-    func setFlowRate(_ flow: Int) async {
-        if isDemo { demo.setFlow(clampedFlow(flow)); return }
-        do { _ = try await api.setFlow(clampedFlow(flow)) }
-        catch { errorMessage = error.localizedDescription; showError = true }
+    func setFlowRate(_ flow: Int) async -> Bool {
+        let want = clampedFlow(flow)
+        if isDemo { demo.setFlow(want); publishFeedback(title: "Flow", message: "\(want) % übernommen ✓", ok: true); return true }
+        return await track("flow", "Flow", want: "\(want) %") {
+            try await api.setFlow(want)
+        }
     }
 
-    func setLight(on: Bool) async {
-        if isDemo { demo.setLight(on: on); return }
-        do { _ = try await api.setLight(on: on) }
-        catch { errorMessage = error.localizedDescription; showError = true }
+    func setLight(on: Bool) async -> Bool {
+        if isDemo { demo.setLight(on: on); publishFeedback(title: "Bauraumlicht", message: on ? "Eingeschaltet ✓" : "Ausgeschaltet ✓", ok: true); return true }
+        return await track("light", "Bauraumlicht", want: on ? "An" : "Aus") {
+            try await api.setLight(on: on)
+        }
     }
 
     func reconnect() {
