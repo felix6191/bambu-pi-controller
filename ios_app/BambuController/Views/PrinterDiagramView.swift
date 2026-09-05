@@ -36,6 +36,13 @@ struct PrinterDiagramView: View {
             }
         }
         .aspectRatio(0.98, contentMode: .fit)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(diagramSummary)
+    }
+
+    private var diagramSummary: String {
+        guard let s = status else { return "Druckerdiagramm, keine Daten" }
+        return "Druckerdiagramm: \(s.state.displayName), Düse \(Int(s.nozzleTemp)) von \(Int(s.nozzleTargetTemp)) Grad, Bett \(Int(s.bedTemp)) von \(Int(s.bedTargetTemp)) Grad, Fortschritt \(Int(s.printJob.progress)) Prozent"
     }
 
     // MARK: - Machine
@@ -179,7 +186,7 @@ struct PrinterDiagramView: View {
         let y = max(h * 0.70 - objH - h * 0.075, h * 0.44)
         return VStack(spacing: 1) {
             Text("\(Int(s.printJob.progress)) %")
-                .font(.system(size: 22, weight: .bold, design: .rounded)).monospacedDigit()
+                .font(.title2).fontWeight(.bold).monospacedDigit()
             if s.printJob.totalLayers > 0 {
                 Text("Schicht \(s.printJob.currentLayer)/\(s.printJob.totalLayers)")
                     .font(.caption2).foregroundColor(.secondary).monospacedDigit()
@@ -206,7 +213,12 @@ private struct ValuePill: View {
     }
 }
 
-#Preview {
+#Preview("Diagramm hell") {
+    PrinterDiagramView(status: DemoService.shared.status)
+        .padding()
+}
+
+#Preview("Diagramm dunkel") {
     PrinterDiagramView(status: DemoService.shared.status)
         .padding()
         .preferredColorScheme(.dark)

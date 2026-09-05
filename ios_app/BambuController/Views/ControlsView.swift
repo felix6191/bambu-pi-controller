@@ -190,7 +190,10 @@ struct TemperatureControlSection: View {
                     }
                 }
             }.frame(height: 20)
-            Slider(value: Binding(get: { Double(target) }, set: { target = Swift.min(Swift.max(0, Int($0)), maxTemp) }), in: 0...Double(maxTemp), step: 1).tint(color)
+            Slider(value: Binding(get: { Double(target) }, set: { target = Swift.min(Swift.max(0, Int($0)), maxTemp) }), in: 0...Double(maxTemp), step: 1)
+                .tint(color)
+                .accessibilityLabel("\(title) Zieltemperatur")
+                .accessibilityValue("\(target) Grad von maximal \(maxTemp) Grad")
             if !presets.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
@@ -238,7 +241,10 @@ struct SliderControlSection: View {
                 if busy { ProgressView() }
                 Text("\(value)\(unit)").font(.system(.body, design: .rounded)).fontWeight(.bold).foregroundColor(color).monospacedDigit()
             }
-            Slider(value: Binding(get: { Double(value) }, set: { value = Swift.min(Swift.max(range.lowerBound, Int($0)), range.upperBound) }), in: Double(range.lowerBound)...Double(range.upperBound), step: Double(step)).tint(color)
+            Slider(value: Binding(get: { Double(value) }, set: { value = Swift.min(Swift.max(range.lowerBound, Int($0)), range.upperBound) }), in: Double(range.lowerBound)...Double(range.upperBound), step: Double(step))
+                .tint(color)
+                .accessibilityLabel(title)
+                .accessibilityValue("\(value) \(unit)")
             HStack {
                 Text("\(range.lowerBound)\(unit)").font(.caption).foregroundColor(.secondary)
                 Spacer()

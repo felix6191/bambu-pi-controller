@@ -40,6 +40,8 @@ struct SettingsView: View {
                         .textFieldStyle(.roundedBorder)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                         Button { showToken.toggle() } label: { Image(systemName: showToken ? "eye.slash" : "eye") }
+                            .touchTarget()
+                            .accessibilityLabel(showToken ? "Token verbergen" : "Token anzeigen")
                     }
                     .onChange(of: settings.apiToken) { _, _ in commit() }
                     Toggle("Tailscale unterwegs nutzen", isOn: $settings.useTailscale)

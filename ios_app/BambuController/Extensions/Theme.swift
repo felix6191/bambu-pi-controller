@@ -2,8 +2,9 @@
 import SwiftUI
 
 enum AppTheme {
-    /// Bambu brand green — used sparingly for primary actions & live states
-    static let accent = Color(hex: "00B259")
+    /// Bambu brand green — adaptive for light/dark (HIG Dark Mode). Used for
+    /// primary actions & confirmed-live states only, never bare decoration.
+    static let accent = Color.adaptiveAccent
     static let danger = Color.red
     static let warning = Color.orange
 
@@ -57,6 +58,19 @@ struct Pill: View {
             .foregroundColor(color)
             .clipShape(Capsule())
     }
+}
+
+/// Guarantees the 44pt minimum touch target (HIG Accessibility > Mobility)
+struct TouchTarget: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .frame(minWidth: 44, minHeight: 44)
+            .contentShape(Rectangle())
+    }
+}
+
+extension View {
+    func touchTarget() -> some View { modifier(TouchTarget()) }
 }
 
 /// Muted explanatory text used in forms and onboarding

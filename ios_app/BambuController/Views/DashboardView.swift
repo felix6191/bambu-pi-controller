@@ -119,7 +119,7 @@ struct TempGauge: View {
             ZStack {
                 Circle().stroke(Color(.systemGray5), lineWidth: 8).frame(width: 70, height: 70)
                 Circle().trim(from: 0, to: fraction).stroke(color, style: StrokeStyle(lineWidth: 8, lineCap: .round)).frame(width: 70, height: 70).rotationEffect(.degrees(-90)).animation(.easeInOut(duration: 0.5), value: current)
-                VStack(spacing: 2) { Text("\(Int(current))°").font(.system(size: 18, weight: .bold, design: .rounded)).monospacedDigit(); if target > 0 { Text("/ \(Int(target))°").font(.caption2).foregroundColor(.secondary).monospacedDigit() } }
+                VStack(spacing: 2) { Text("\(Int(current))°").font(.title3).fontWeight(.bold).monospacedDigit(); if target > 0 { Text("/ \(Int(target))°").font(.caption2).foregroundColor(.secondary).monospacedDigit() } }
             }
         }.frame(maxWidth: .infinity)
     }
@@ -132,7 +132,7 @@ struct PrintJobCard: View {
             HStack {
                 Text("Aktueller Druck").font(.headline)
                 Spacer()
-                Text(status.state == .paused ? "PAUSIERT" : "DRUCKT").font(.caption).fontWeight(.bold).padding(.horizontal, 8).padding(.vertical, 4).background(status.state == .paused ? Color.orange : Color.blue).foregroundColor(.white).cornerRadius(8)
+                Text(status.state == .paused ? "Pausiert" : "Druckt").font(.caption).fontWeight(.bold).padding(.horizontal, 8).padding(.vertical, 4).background(status.state == .paused ? Color.orange : Color.blue).foregroundColor(.white).cornerRadius(8)
             }
             Text(status.printJob.name.isEmpty ? "Unbekannte Datei" : status.printJob.name).font(.title3).fontWeight(.medium).lineLimit(1)
             HStack(spacing: 24) {

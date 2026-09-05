@@ -135,6 +135,8 @@ class PrinterViewModel: ObservableObject {
     private func publishFeedback(title: String, message: String, ok: Bool) {
         let fb = CommandFeedback(title: title, message: message, ok: ok)
         feedback = fb
+        // Haptics pair the visual cue (HIG Media: augment feedback, don't rely on visuals alone)
+        UINotificationFeedbackGenerator().notificationOccurred(ok ? .success : .warning)
         Task {
             try? await Task.sleep(nanoseconds: 4_500_000_000)
             if feedback == fb { feedback = nil }

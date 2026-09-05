@@ -11,10 +11,8 @@ struct BambuControllerApp: App {
             if onboarded {
                 ContentView()
                     .environmentObject(appState)
-                    .preferredColorScheme(.dark)
             } else {
                 OnboardingView(finished: $onboarded)
-                    .preferredColorScheme(.dark)
                     .onChange(of: onboarded) { _, v in
                         guard v else { return }
                         // After onboarding, boot the live/demo connection once

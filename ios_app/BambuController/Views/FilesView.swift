@@ -124,6 +124,8 @@ private struct JobCard: View {
                 Button(role: .destructive) { confirmDelete = true } label: {
                     Image(systemName: "trash").foregroundColor(.secondary)
                 }
+                .touchTarget()
+                .accessibilityLabel("\(job.filename) löschen")
                 .disabled(job.stage.isBusy)
             }
             if job.stage.isBusy {

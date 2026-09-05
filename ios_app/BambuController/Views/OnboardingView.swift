@@ -158,6 +158,8 @@ struct OnboardingView: View {
                     }
                     .textFieldStyle(.roundedBorder).textInputAutocapitalization(.never).autocorrectionDisabled()
                     Button { showToken.toggle() } label: { Image(systemName: showToken ? "eye.slash" : "eye") }
+                        .touchTarget()
+                        .accessibilityLabel(showToken ? "Token verbergen" : "Token anzeigen")
                 }
                 Button("Woher kommt der Token?") { showWhereToken = true }
                     .font(.footnote)

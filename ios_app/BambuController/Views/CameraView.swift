@@ -29,6 +29,8 @@ struct CameraView: View {
                         Button("Snapshot aktualisieren") { Task { await cam.refreshSnapshot() } }
                         Button("Stream neu starten") { cam.restartStream() }
                     } label: { Image(systemName: "ellipsis.circle") }
+                        .touchTarget()
+                        .accessibilityLabel("Kamera-Optionen")
                 }
             }
             .task { await cam.start() }
