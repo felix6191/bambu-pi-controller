@@ -31,6 +31,17 @@ case "$cmd" in
     ;;
   update)
     cd "$INSTALL_DIR" && git pull --ff-only origin main
+    # Helfer + Auto-Discovery (mDNS) bei alten Installationen nachrüsten
+    if [[ -f "$INSTALL_DIR/pi_helpers/bambu" ]]; then
+      cp "$INSTALL_DIR/pi_helpers/bambu" /usr/local/bin/bambu
+      chmod +x /usr/local/bin/bambu
+    fi
+    if [[ -f "$INSTALL_DIR/pi_helpers/bambu-pi-avahi.service" ]]; then
+      mkdir -p /etc/avahi/services
+      cp "$INSTALL_DIR/pi_helpers/bambu-pi-avahi.service" /etc/avahi/services/bambu-pi.service
+      systemctl enable --now avahi-daemon 2>/dev/null || true
+      systemctl reload avahi-daemon 2>/dev/null || true
+    fi
     sudo -u "$SERVICE_USER" docker compose up -d --build
     echo "Aktualisiert."
     ;;

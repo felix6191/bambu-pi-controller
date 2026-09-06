@@ -1,6 +1,7 @@
 """Pairing ohne Zahlentippen.
 
-Der Pi sendet per mDNS `_bambu-pi._tcp` (siehe pi_image/). Die App findet ihn
+Der Pi meldet sich per mDNS `_bambu-pi._tcp` (Avahi-Service, richtet
+install.sh ein — siehe pi_helpers/bambu-pi-avahi.service). Die App findet ihn
 darüber, ein Tap auf „Verbinden" ruft claim auf — Token wird automatisch
 übergeben und in der App gespeichert. Keine IP-, keine Token-Eingabe.
 

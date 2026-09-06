@@ -1,8 +1,0 @@
-[Unit]
-Description=Bambu Setup-AP Fallback (nur ohne Netzwerk)
-After=bambu-firstboot.service
-
-[Service]
-Type=oneshot
-ExecStart=/bin/bash /opt/bambu-pi-controller/pi_image/stage-bambu/00-firstboot/files/bambu-setup-ap.sh
-RemainAfterExit=yes

@@ -1,6 +1,7 @@
 <?xml version="1.0" standalone='no'?>
 <!DOCTYPE service-group SYSTEM "avahi-service.dtd">
-<!-- Das „Ausgangssignal": Die App findet den Pi ohne IP-Eingabe darüber. -->
+<!-- Das „Ausgangssignal": Die iPhone-App findet den Pi ohne IP-Eingabe darüber.
+     Wird von install.sh nach /etc/avahi/services/bambu-pi.service kopiert. -->
 <service-group>
   <name replace-wildcards="yes">Bambu-Pi on %h</name>
   <service>

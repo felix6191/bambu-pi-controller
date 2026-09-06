@@ -46,8 +46,3 @@ xcuserdata/
 
 # Installer
 /opt/bambu-pi-controller/
-
-# Pi-Image (Build-Artefakte; config + stage sind Code)
-pi_image/stage-bambu/bambu-repo.tar.gz
-pi_image/pi-gen/
-pi_image/config

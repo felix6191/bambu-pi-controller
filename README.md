@@ -2,9 +2,9 @@
 
 Dein Bambu Lab A1 — vom iPhone aus überwachen und steuern, von überall. Der Raspberry Pi ist die Brücke, Tailscale der sichere Tunnel. Keine Vorkenntnisse nötig.
 
-## 🚀 In 3 Schritten startklar (kein Vorwissen nötig)
+## 🚀 In 3 Schritten startklar (kein Vorwissen nötig, kein Custom-Image)
 
-**Schritt 1 · Pi vorbereiten:** Raspberry Pi OS auf SD-Karte flashen, Pi starten, ins gleiche WLAN wie den Drucker bringen.
+**Schritt 1 · Pi vorbereiten:** Ganz normales **Raspberry Pi OS (64-bit)** per offiziellem **Raspberry Pi Imager** auf SD-Karte flashen, Pi starten, ins gleiche WLAN wie den Drucker bringen. Es ist kein spezielles Image nötig.
 
 **Schritt 2 · Ein Befehl auf dem Pi** (Terminal öffnen, einfügen, Enter — der Rest ist ein geführter Dialog auf Deutsch):
 
@@ -12,9 +12,9 @@ Dein Bambu Lab A1 — vom iPhone aus überwachen und steuern, von überall. Der 
 curl -fsSL https://raw.githubusercontent.com/felix6191/bambu-pi-controller/main/install.sh | sudo bash
 ```
 
-Der Installer prüft alles selbst und fragt dich Schritt für Schritt: Drucker-IP, Seriennummer, Access Code (steht alles am Drucker-Display bzw. auf dem Aufkleber — mit Anleitung). Wer will, überspringt das und trägt die 3 Werte **bequem am Drucker stehend per iPhone-App** nach (Einrichtung → Drucker → „An Pi senden & verbinden" — der Pi speichert und verbindet sich sofort). Falsche Eingaben werden sofort bemängelt, die Drucker-Erreichbarkeit wird getestet, Tailscale-Login geht per Link. Am Ende zeigt er dir **genau die 2 Werte, die du ins iPhone tippen musst** (werden auch in `IPHONE_SETUP.txt` gespeichert, jederzeit via `sudo bambu iphone` erneut anzeigbar).
+Der Installer prüft alles selbst (System, Docker, Tailscale, Auto-Discovery per mDNS) und fragt dich Schritt für Schritt: Drucker-IP, Seriennummer, Access Code (steht alles am Drucker-Display bzw. auf dem Aufkleber — mit Anleitung). Wer will, überspringt das und trägt die 3 Werte **bequem am Drucker stehend per iPhone-App** nach (die App lässt den Pi scannen, dann „An Pi senden & verbinden" — der Pi speichert und verbindet sich sofort). Falsche Eingaben werden sofort bemängelt, die Drucker-Erreichbarkeit wird getestet, Tailscale-Login geht per Link. Als Fallback zeigt er dir **die 2 Werte fürs manuelle Eintippen** (werden auch in `IPHONE_SETUP.txt` gespeichert, jederzeit via `sudo bambu iphone` erneut anzeigbar).
 
-**Schritt 3 · iPhone:** App öffnen → Einrichtung folgen (oder Demo-Modus zum Ausprobieren) → die 2 Werte vom Pi-Bildschirm eintragen → „Verbindung testen" → ✅ fertig.
+**Schritt 3 · iPhone:** App öffnen → Einrichtung folgen (oder Demo-Modus zum Ausprobieren) → der Pi **erscheint von allein** → antippen → **„Verbinden"** (nichts abtippen, Token kommt per Pairing automatisch) → Drucker wählen → ✅ fertig. Nur unterwegs via Tailscale brauchst du einmalig die 2 Werte vom Pi-Bildschirm.
 
 **Später auf dem Pi (alles mit einem Wort):**
 | Befehl | Was passiert |
@@ -57,8 +57,8 @@ Der Installer prüft alles selbst und fragt dich Schritt für Schritt: Drucker-I
 
 ## Voraussetzungen
 
-### Raspberry Pi 4
-- Raspberry Pi OS (64-bit) oder Ubuntu Server 22.04+
+### Raspberry Pi (kein Custom-Image nötig)
+- Standard Raspberry Pi OS (64-bit) oder Ubuntu Server 22.04+
 - Im gleichen LAN wie der Bambu A1
 
 ### Bambu Lab A1
@@ -107,9 +107,10 @@ docker compose up -d --build
 3. Auf iPhone deployen (Cmd+R)
 
 ### 6. App konfigurieren
-In der App unter **Einstellungen**:
+Normalfall: nichts tippen — App öffnen, Pi antippen, „Verbinden".
+Nur als Fallback (z. B. Tailscale von unterwegs) in der App unter **Einstellungen**:
 - **Server URL**: `http://<tailscale-ip-des-pi>:8000`
-- **API Token**: Der gleiche wie in `.env` auf dem Pi
+- **API Token**: Der gleiche wie in `.env` auf dem Pi (`sudo bambu iphone` zeigt ihn)
 - **Tailscale verwenden**: AN
 - **Auto-Verbinden**: AN
 - **Verbindung testen** tippen
@@ -120,7 +121,7 @@ In der App unter **Einstellungen**:
 bambu-pi-controller/
 ├── pi_backend/                 # Python FastAPI Backend
 │   ├── app/
-│   │   ├── api/               # REST Endpoints
+│   │   ├── api/               # REST Endpoints (inkl. Pairing ohne Tippen)
 │   │   ├── core/              # Config, Settings
 │   │   ├── mqtt/              # Bambu MQTT Client & Protocol
 │   │   └── main.py            # FastAPI App + WebSocket
@@ -130,12 +131,15 @@ bambu-pi-controller/
 ├── ios_app/
 │   └── BambuController/       # SwiftUI iOS App
 │       ├── Models/            # Data Models
-│       ├── Services/          # APIService, WebSocketService
+│       ├── Services/          # APIService, WebSocketService, PiDiscovery (mDNS)
 │       ├── ViewModels/        # PrinterViewModel
-│       ├── Views/             # Dashboard, Controls, Camera, Settings
+│       ├── Views/             # Dashboard, Controls, Camera, Settings, SetupFlow
 │       └── Extensions/        # Color extensions
+├── pi_helpers/
+│   ├── bambu                  # Helfer: sudo bambu {status|iphone|logs|update|…}
+│   └── bambu-pi-avahi.service # mDNS-Anzeige _bambu-pi._tcp (richtet install.sh ein)
 ├── docker-compose.yml         # Pi + Tailscale
-├── install.sh                 # One-click installer
+├── install.sh                 # One-Click Installer (einziger Installationsweg)
 ├── deploy.sh                  # Deploy helper
 └── README.md
 ```

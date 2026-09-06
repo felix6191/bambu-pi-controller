@@ -1,5 +1,5 @@
 // PiDiscovery.swift - Findet den Pi ohne IP-Eingabe (Bonjour/mDNS).
-// Der Pi sendet dauerhaft `_bambu-pi._tcp` (Avahi, siehe pi_image/).
+// Der Pi meldet sich per `_bambu-pi._tcp` (Avahi, richtet install.sh ein).
 import Foundation
 import Combine
 

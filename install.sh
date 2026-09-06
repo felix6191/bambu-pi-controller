@@ -1,10 +1,13 @@
 #!/bin/bash
-# Bambu Pi Controller — One-Click Installer für Raspberry Pi 4 + Bambu Lab A1
+# Bambu Pi Controller — One-Click Installer für Raspberry Pi + Bambu Lab A1
 #
-# Anwendung (genau 1 Befehl auf dem frischen Pi):
+# Einziger Installationsweg (kein Custom-Image, kein Flashen nötig):
+# Standard Raspberry Pi OS (64-bit) per offiziellem Pi Imager auf SD-Karte,
+# Pi starten, dann genau 1 Befehl auf dem Pi:
 #   curl -fsSL https://raw.githubusercontent.com/felix6191/bambu-pi-controller/main/install.sh | sudo bash
 #
-# Danach: iPhone-App öffnen → Einrichtung folgen → Werte vom Bildschirm übernehmen. Fertig.
+# Danach: iPhone-App öffnen → Pi erscheint von allein → 'Verbinden' tippen.
+# Fallback (z. B. unterwegs via Tailscale): 2 Werte vom Bildschirm abtippen.
 #
 # Flags:
 #   --configure   Nur Einrichtungs-Wizard erneut durchlaufen (Druckerdaten korrigieren)
@@ -36,7 +39,7 @@ MODE="install"
 check_root() { [[ $EUID -eq 0 ]] || err "Bitte mit sudo starten. Richtiger Befehl steht in der Anleitung."; }
 
 preflight() {
-    title "Schritt 0/5 · System prüfen"
+    title "Schritt 0/6 · System prüfen"
     if [[ -f /etc/os-release ]]; then
         # shellcheck disable=SC1091
         . /etc/os-release
@@ -58,11 +61,12 @@ preflight() {
 }
 
 install_base() {
-    title "Schritt 1/5 · Grundprogramme installieren"
+    title "Schritt 1/6 · Grundprogramme installieren"
     export DEBIAN_FRONTEND=noninteractive
     apt-get update -qq
-    apt-get install -y -qq git curl openssl ca-certificates iputils-ping qrencode >/dev/null 2>&1 || \
-        apt-get install -y -qq git curl openssl ca-certificates iputils-ping >/dev/null
+    apt-get install -y -qq git curl openssl ca-certificates iputils-ping avahi-daemon qrencode >/dev/null 2>&1 || \
+        apt-get install -y -qq git curl openssl ca-certificates iputils-ping avahi-daemon >/dev/null
+    systemctl enable --now avahi-daemon 2>/dev/null || true
     ok "Grundprogramme bereit"
 }
 
@@ -101,7 +105,7 @@ check_slicer() {
 }
 
 setup_user_repo() {
-    title "Schritt 2/5 · Programmdateien holen"
+    title "Schritt 2/6 · Programmdateien holen"
     if ! id "$SERVICE_USER" &>/dev/null; then
         useradd -r -m -s /bin/bash "$SERVICE_USER"
         usermod -aG docker "$SERVICE_USER"
@@ -150,7 +154,7 @@ ask() { # ask VAR "Prompt" "Default" "Hint"
 
 wizard() {
     local env="$ENV_FILE"
-    title "Schritt 3/5 · Drucker einrichten (einmalig)"
+    title "Schritt 3/6 · Drucker einrichten (einmalig)"
     echo "Ich brauche 3 Angaben von deinem Bambu Lab A1."
     echo "Alle findest du wie folgt:"
     echo "  1. Am Drucker-Display: Einstellungen → Netzwerk → IP-Adresse + Access Code"
@@ -254,10 +258,28 @@ wizard() {
     ok "Drucker-Konfiguration gespeichert"
 }
 
+# ------------------------------------------------------------- mdns ---
+
+setup_mdns() {
+    title "Schritt 4/6 · iPhone-Findung einrichten (Auto-Discovery)"
+    # Die App findet den Pi ohne IP-Eingabe per mDNS `_bambu-pi._tcp`.
+    # Früher kam das aus dem Flash-Image — jetzt richtet es der Installer ein.
+    local src="$INSTALL_DIR/pi_helpers/bambu-pi-avahi.service"
+    if [[ -f "$src" ]]; then
+        mkdir -p /etc/avahi/services
+        cp "$src" /etc/avahi/services/bambu-pi.service
+        systemctl enable --now avahi-daemon 2>/dev/null || service avahi-daemon restart 2>/dev/null || true
+        systemctl reload avahi-daemon 2>/dev/null || true
+        ok "Pi meldet sich im WLAN als _bambu-pi._tcp (App findet ihn von allein)"
+    else
+        warn "Avahi-Service-Datei fehlt ($src) — App findet Pi nur per IP. Update holen mit 'sudo bambu update'."
+    fi
+}
+
 # ------------------------------------------------------------- tailscale ---
 
 setup_tailscale() {
-    title "Schritt 4/5 · Weltweiten Zugriff einrichten (Tailscale)"
+    title "Schritt 5/6 · Weltweiten Zugriff einrichten (Tailscale)"
     local ts_key
     ts_key=$(grep "^TAILSCALE_AUTHKEY=" "$ENV_FILE" 2>/dev/null | cut -d= -f2)
 
@@ -306,7 +328,7 @@ setup_tailscale() {
 # ---------------------------------------------------------------- deploy ---
 
 deploy() {
-    title "Schritt 5/5 · Server starten"
+    title "Schritt 6/6 · Server starten"
     log "Baue und starte (erster Start lädt Docker-Bilder, dauert ein paar Minuten) …"
     cd "$INSTALL_DIR"
     sudo -u "$SERVICE_USER" docker compose up -d --build || err "Start fehlgeschlagen. Details: sudo bambu logs"
@@ -358,12 +380,13 @@ print_summary() {
     echo -e "${GREEN}║  FERTIG! 🎉  Dein Drucker-Server läuft.           ║${NC}"
     echo -e "${GREEN}╚════════════════════════════════════════════════════╝${NC}"
     echo ""
-    echo -e "${BOLD}So geht es auf dem iPhone weiter (2 Minuten):${NC}"
+    echo -e "${BOLD}So geht es auf dem iPhone weiter (1 Minute):${NC}"
     echo "  1. BambuController-App öffnen → Einrichtung starten"
-    echo "  2. Folgende 2 Werte eintippen:"
+    echo "  2. Dein Pi erscheint von allein -> antippen -> 'Verbinden' (nichts abtippen!)"
+    echo "  3. Nur als Fallback (z. B. unterwegs via Tailscale) diese 2 Werte tippen:"
     echo -e "     ${BOLD}Server URL:${NC}  $IPHONE_URL"
     echo -e "     ${BOLD}API Token:${NC}   $IPHONE_TOKEN"
-    echo "  3. 'Verbindung testen' → ✅ → 'Fertig'"
+    echo "  4. 'Verbindung testen' → ✅ → 'Fertig'"
     echo ""
     if command -v qrencode &>/dev/null; then
         echo "  QR-Code für die Server-URL (Token danach abtippen):"
@@ -384,7 +407,7 @@ main() {
     echo -e "${BLUE}${BOLD}"
     echo "╔════════════════════════════════════════════════════╗"
     echo "║  Bambu Pi Controller · 1-Klick-Installation        ║"
-    echo "║  Raspberry Pi 4 + Bambu Lab A1 + iPhone            ║"
+    echo "║  Raspberry Pi + Bambu Lab A1 + iPhone              ║"
     echo "╚════════════════════════════════════════════════════╝"
     echo -e "${NC}"
     check_root
@@ -393,6 +416,11 @@ main() {
         [[ -d "$INSTALL_DIR/.git" ]] || err "Nichts installiert. Erst normal installieren."
         cd "$INSTALL_DIR"
         git pull --ff-only origin main
+        if [[ -f "$INSTALL_DIR/pi_helpers/bambu" ]]; then
+            cp "$INSTALL_DIR/pi_helpers/bambu" /usr/local/bin/bambu
+            chmod +x /usr/local/bin/bambu
+        fi
+        setup_mdns
         sudo -u "$SERVICE_USER" docker compose up -d --build
         ok "Aktualisiert."
         exit 0
@@ -402,6 +430,7 @@ main() {
         [[ -f "$INSTALL_DIR/pi_backend/.env.example" ]] || err "Nichts installiert. Erst normal installieren."
         # Alte Werte als Vorschlag laden
         wizard
+        setup_mdns
         cd "$INSTALL_DIR"
         sudo -u "$SERVICE_USER" docker compose up -d --build
         ok "Neu konfiguriert und neu gestartet."
@@ -416,6 +445,7 @@ main() {
     install_tailscale
     setup_user_repo
     wizard
+    setup_mdns
     setup_tailscale
     check_slicer
     deploy
