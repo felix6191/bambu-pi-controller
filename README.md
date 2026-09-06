@@ -2,6 +2,13 @@
 
 Dein Bambu Lab A1 — vom iPhone aus überwachen und steuern, von überall. Der Raspberry Pi ist die Brücke, Tailscale der sichere Tunnel. Keine Vorkenntnisse nötig.
 
+> ## ⚡ Schnellinstallation auf dem Pi — 1 Befehl
+> Standard **Raspberry Pi OS (64-bit)** per offiziellem **Raspberry Pi Imager** flashen, Pi starten, Terminal öffnen, einfügen, Enter:
+> ```bash
+> curl -fsSL https://raw.githubusercontent.com/felix6191/bambu-pi-controller/main/install.sh | sudo bash
+> ```
+> Bei allen Fragen einfach **ENTER** drücken (nichts tippen — der Rest passiert in der App). Danach: App öffnen → Pi antippen → **Verbinden** → Drucker wählen → ✅ fertig.
+
 ## 🚀 In 3 Schritten startklar (kein Vorwissen nötig, kein Custom-Image)
 
 **Schritt 1 · Pi vorbereiten:** Ganz normales **Raspberry Pi OS (64-bit)** per offiziellem **Raspberry Pi Imager** auf SD-Karte flashen, Pi starten, ins gleiche WLAN wie den Drucker bringen. Es ist kein spezielles Image nötig.
@@ -12,7 +19,7 @@ Dein Bambu Lab A1 — vom iPhone aus überwachen und steuern, von überall. Der 
 curl -fsSL https://raw.githubusercontent.com/felix6191/bambu-pi-controller/main/install.sh | sudo bash
 ```
 
-Der Installer prüft alles selbst (System, Docker, Tailscale, Auto-Discovery per mDNS) und fragt dich Schritt für Schritt: Drucker-IP, Seriennummer, Access Code (steht alles am Drucker-Display bzw. auf dem Aufkleber — mit Anleitung). Wer will, überspringt das und trägt die 3 Werte **bequem am Drucker stehend per iPhone-App** nach (die App lässt den Pi scannen, dann „An Pi senden & verbinden" — der Pi speichert und verbindet sich sofort). Falsche Eingaben werden sofort bemängelt, die Drucker-Erreichbarkeit wird getestet, Tailscale-Login geht per Link. Als Fallback zeigt er dir **die 2 Werte fürs manuelle Eintippen** (werden auch in `IPHONE_SETUP.txt` gespeichert, jederzeit via `sudo bambu iphone` erneut anzeigbar).
+Der Installer prüft alles selbst (System, Docker, Tailscale, Auto-Discovery per mDNS). **Am Pi musst du nichts tippen: bei jeder Frage einfach ENTER drücken** — alle Defaults bedeuten „später per App". Der Server startet auch ganz ohne Druckerdaten. Wer will, gibt Drucker-IP, Seriennummer und Access Code (Drucker-Display bzw. Aufkleber) direkt ein — oder trägt die 3 Werte **bequem am Drucker stehend per iPhone-App** nach (die App lässt den Pi scannen, dann „An Pi senden & verbinden" — der Pi speichert und verbindet sich sofort). Falsche Eingaben werden sofort bemängelt, die Drucker-Erreichbarkeit wird getestet, Tailscale-Login geht per Link (mit `n` überspringbar, später per `sudo tailscale up` nachholbar). Als Fallback zeigt er dir **die 2 Werte fürs manuelle Eintippen** (werden auch in `IPHONE_SETUP.txt` gespeichert, jederzeit via `sudo bambu iphone` erneut anzeigbar).
 
 **Schritt 3 · iPhone:** App öffnen → Einrichtung folgen (oder Demo-Modus zum Ausprobieren) → der Pi **erscheint von allein** → antippen → **„Verbinden"** (nichts abtippen, Token kommt per Pairing automatisch) → Drucker wählen → ✅ fertig. Nur unterwegs via Tailscale brauchst du einmalig die 2 Werte vom Pi-Bildschirm.
 

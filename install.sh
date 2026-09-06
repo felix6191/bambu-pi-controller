@@ -6,7 +6,9 @@
 # Pi starten, dann genau 1 Befehl auf dem Pi:
 #   curl -fsSL https://raw.githubusercontent.com/felix6191/bambu-pi-controller/main/install.sh | sudo bash
 #
-# Danach: iPhone-App öffnen → Pi erscheint von allein → 'Verbinden' tippen.
+# Am Pi muss nichts getippt werden: bei allen Fragen einfach ENTER drücken
+# (Defaults = alles später per App). Der Rest passiert in der iPhone-App:
+# Pi antippen → Verbinden → Drucker wählen → fertig.
 # Fallback (z. B. unterwegs via Tailscale): 2 Werte vom Bildschirm abtippen.
 #
 # Flags:
@@ -37,6 +39,19 @@ MODE="install"
 # ---------------------------------------------------------------- checks ---
 
 check_root() { [[ $EUID -eq 0 ]] || err "Bitte mit sudo starten. Richtiger Befehl steht in der Anleitung."; }
+
+ensure_tty() {
+    # Bei `curl … | sudo bash` hängt stdin an der Pipe, nicht an der Tastatur —
+    # ohne diesen Trick würden die `read`-Abfragen unten Skriptzeilen statt
+    # Tastatureingaben lesen. Terminal zurückholen, damit ENTER wirklich ENTER ist.
+    if [[ ! -t 0 ]]; then
+        if [[ -e /dev/tty ]]; then
+            exec </dev/tty 2>/dev/null || warn "Kein Terminal für Eingaben — laufe mit Defaults (Drucker später per iPhone einrichten)."
+        else
+            warn "Kein Terminal erkannt — laufe vollautomatisch mit Defaults (Drucker später per iPhone einrichten)."
+        fi
+    fi
+}
 
 preflight() {
     title "Schritt 0/6 · System prüfen"
@@ -165,9 +180,26 @@ wizard() {
     echo "  3 Werte später direkt am Drucker stehend per iPhone-App nachtragen"
     echo "  (App → Einrichtung → Drucker). Der Server startet auch ohne."
     echo ""
+    # Bestehende Werte laden (für Reconfigure: ENTER behält sie)
+    local old_host="" old_serial="" old_code=""
+    if [[ -f "$ENV_FILE" ]]; then
+        old_host=$(grep "^PRINTER_HOST=" "$ENV_FILE" 2>/dev/null | cut -d= -f2)
+        old_serial=$(grep "^PRINTER_SERIAL=" "$ENV_FILE" 2>/dev/null | cut -d= -f2)
+        old_code=$(grep "^PRINTER_ACCESS_CODE=" "$ENV_FILE" 2>/dev/null | cut -d= -f2)
+    fi
+
     if [[ -z "${PRINTER_HOST:-}" ]]; then
-        read -rp "  Jetzt eingeben (j) oder später per iPhone (s)? [j/s]: " _when
-        if [[ "$_when" == "s" || "$_when" == "S" ]]; then
+        # Default ist ÜBERSPRINGEN: einfach ENTER hämmern → alles später per App.
+        # Nur wer jetzt tippen will, drückt j.
+        if [[ -n "$old_host" ]]; then
+            echo "  Gespeichert ist bereits: $old_host (Seriennummer ${old_serial:-?})"
+        fi
+        read -rp "  Jetzt eingeben (j) oder später per iPhone (Enter)? [Enter]: " _when
+        if [[ "$_when" != "j" && "$_when" != "J" ]]; then
+            if [[ -n "$old_host" ]]; then
+                log "Behalte bisherige Druckerdaten ($old_host) — weiter geht's."
+                return 0
+            fi
             log "Übersprungen — Drucker wird später per iPhone eingerichtet."
             # Leere Platzhalter schreiben, API-Token trotzdem erzeugen
             if [[ -z "${API_TOKEN:-}" ]]; then
@@ -181,14 +213,6 @@ wizard() {
             ok "Platzhalter gespeichert — weiter geht's"
             return 0
         fi
-    fi
-
-    # Bestehende Werte als Vorschlag anbieten
-    local old_host="" old_serial="" old_code=""
-    if [[ -f "$ENV_FILE" ]]; then
-        old_host=$(grep "^PRINTER_HOST=" "$ENV_FILE" 2>/dev/null | cut -d= -f2)
-        old_serial=$(grep "^PRINTER_SERIAL=" "$ENV_FILE" 2>/dev/null | cut -d= -f2)
-        old_code=$(grep "^PRINTER_ACCESS_CODE=" "$ENV_FILE" 2>/dev/null | cut -d= -f2)
     fi
 
     while true; do
@@ -288,6 +312,17 @@ setup_tailscale() {
         tailscale up --authkey="$ts_key" --hostname=bambu-pi --accept-routes >/dev/null 2>&1 || true
         sleep 3
     else
+        if [[ ! -t 0 ]]; then
+            warn "Nicht interaktiv — Tailscale-Login übersprungen (nur Heimnetz). Später: 'sudo tailscale up'."
+            TAILSCALE_IP=""; return 0
+        fi
+        echo ""
+        echo "  Gleich startet der Tailscale-Login per Link (Handy/PC, 1 Minute)."
+        read -rp "  Jetzt verbinden (Enter) oder später (n)? [Enter]: " _ts_now
+        if [[ "$_ts_now" == "n" || "$_ts_now" == "N" ]]; then
+            warn "Tailscale übersprungen — nur Heimnetz. Später: 'sudo tailscale up'."
+            TAILSCALE_IP=""; return 0
+        fi
         log "Starte Tailscale-Login …"
         rm -f /tmp/ts_up.log
         tailscale up --hostname=bambu-pi >/tmp/ts_up.log 2>&1 &
@@ -411,6 +446,7 @@ main() {
     echo "╚════════════════════════════════════════════════════╝"
     echo -e "${NC}"
     check_root
+    ensure_tty
 
     if [[ "$MODE" == "update" ]]; then
         [[ -d "$INSTALL_DIR/.git" ]] || err "Nichts installiert. Erst normal installieren."
