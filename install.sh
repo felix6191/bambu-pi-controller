@@ -6,16 +6,16 @@
 # Pi starten, dann genau 1 Befehl auf dem Pi:
 #   curl -fsSL https://raw.githubusercontent.com/felix6191/bambu-pi-controller/main/install.sh | sudo bash
 #
-# Am Pi muss nichts getippt werden: bei allen Fragen einfach ENTER drücken
-# (Defaults = alles später per App). Der Rest passiert in der iPhone-App:
-# Pi antippen → Verbinden → Drucker wählen → fertig.
-# Fallback (z. B. unterwegs via Tailscale): 2 Werte vom Bildschirm abtippen.
+# Am Pi muss gar nichts eingetippt werden: Der Installer fragt KEINE
+# Druckerdaten ab. Der Pi startet ohne Drucker; die iPhone-App findet ihn,
+# verbindet sich und richtet den Drucker ein. Fernzugriff (Tailscale) wird
+# ebenfalls erst später in der App aktiviert.
 #
 # Flags:
-#   --configure   Nur Einrichtungs-Wizard erneut durchlaufen (Druckerdaten korrigieren)
+#   --configure   Zugangs-Token neu erzeugen (Druckerdaten bleiben)
 #   --update      Repo aktualisieren + Container neu bauen
-# Umgebungsvariablen (optional, für Profis — überspringen die Fragen):
-#   PRINTER_HOST PRINTER_SERIAL PRINTER_ACCESS_CODE TAILSCALE_AUTHKEY API_TOKEN
+# Umgebungsvariablen (optional, nur für Profis):
+#   PRINTER_HOST PRINTER_SERIAL PRINTER_ACCESS_CODE API_TOKEN
 
 set -e
 trap 'echo ""; echo "[FEHLER] Abgebrochen. Einfach erneut starten — der Installer macht da weiter, wo er war."' ERR
@@ -54,7 +54,7 @@ ensure_tty() {
 }
 
 preflight() {
-    title "Schritt 0/6 · System prüfen"
+    title "Schritt 0/5 · System prüfen"
     if [[ -f /etc/os-release ]]; then
         # shellcheck disable=SC1091
         . /etc/os-release
@@ -76,7 +76,7 @@ preflight() {
 }
 
 install_base() {
-    title "Schritt 1/6 · Grundprogramme installieren"
+    title "Schritt 1/5 · Grundprogramme installieren"
     export DEBIAN_FRONTEND=noninteractive
     apt-get update -qq
     apt-get install -y -qq git curl openssl ca-certificates iputils-ping avahi-daemon qrencode >/dev/null 2>&1 || \
@@ -101,26 +101,39 @@ install_compose() {
 }
 
 install_tailscale() {
-    if command -v tailscale &>/dev/null; then ok "Tailscale ist schon da"; return; fi
-    log "Tailscale wird installiert (für weltweiten Zugriff vom iPhone) …"
-    curl -fsSL https://tailscale.com/install.sh | sh >/dev/null 2>&1
-    ok "Tailscale installiert"
-}
-
-check_slicer() {
-    # Optional: STL→G-Code direkt auf dem Pi (ARM64-Build nötig, kein Pflichtprogramm)
-    if command -v prusa-slicer &>/dev/null || command -v prusa_slicer &>/dev/null || command -v orcaslicer &>/dev/null || command -v bambustudio &>/dev/null; then
-        ok "Slicer gefunden — STL-Druck aus der App funktioniert"
+    # Nur installieren und bereitstellen — KEIN Login, keine Rückfrage.
+    # Der Login passiert später in der App (Einstellungen → Fernzugriff).
+    if command -v tailscale &>/dev/null; then
+        ok "Tailscale ist schon da (Login später in der App)"
     else
-        warn "Kein Slicer auf dem Pi (nötig für STL→G-Code in der App)."
-        echo "  Später nachholen: ARM64-Build von PrusaSlicer/OrcaSlicer installieren,"
-        echo "  ggf. SLICER_CMD/SLICER_TEMPLATE in docker-compose.yml anpassen (siehe README)."
-        echo "  Ohne Slicer gehen trotzdem: Status, Steuerung, Kamera + SD-Dateien starten."
+        log "Tailscale wird installiert (nur für späteren Fernzugriff, kein Login) …"
+        curl -fsSL https://tailscale.com/install.sh | sh >/dev/null 2>&1 || {
+            warn "Tailscale-Installation fehlgeschlagen — später nachholbar mit 'sudo bambu tailscale'."
+            return 0
+        }
     fi
+    systemctl enable --now tailscaled 2>/dev/null || systemctl enable --now tailscale 2>/dev/null || true
+    # Bind-Mounts in docker-compose.yml brauchen diese Pfade, sonst startet
+    # der Container nicht. Notfalls leere Platzhalter anlegen.
+    mkdir -p /var/run/tailscale
+    if [[ ! -e /usr/bin/tailscale ]]; then
+        warn "Tailscale-CLI nicht gefunden — Fernzugriff bleibt deaktiviert, bis 'sudo bambu tailscale' läuft."
+        : > /usr/bin/tailscale && chmod 644 /usr/bin/tailscale
+    fi
+    # Socket für den Container zugänglich machen, damit die App den Login
+    # starten kann. (Sonst käme der Container nicht an den Daemon.)
+    mkdir -p /etc/systemd/system/tailscaled.service.d
+    cat > /etc/systemd/system/tailscaled.service.d/bambu-socket.conf <<'EOF'
+[Service]
+ExecStartPost=/bin/sh -c 'chmod 777 /var/run/tailscale/tailscaled.sock 2>/dev/null || true'
+EOF
+    systemctl daemon-reload 2>/dev/null || true
+    systemctl restart tailscaled 2>/dev/null || true
+    ok "Tailscale bereit (Login in der App unter Einstellungen → Fernzugriff)"
 }
 
 setup_user_repo() {
-    title "Schritt 2/6 · Programmdateien holen"
+    title "Schritt 2/5 · Programmdateien holen"
     if ! id "$SERVICE_USER" &>/dev/null; then
         useradd -r -m -s /bin/bash "$SERVICE_USER"
         usermod -aG docker "$SERVICE_USER"
@@ -143,116 +156,26 @@ setup_user_repo() {
 
 # ------------------------------------------------------------- wizard ---
 
-valid_ip() {
-    [[ "$1" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || return 1
-    local IFS=.
-    # shellcheck disable=SC2162
-    read -r a b c d <<< "$1"
-    for o in "$a" "$b" "$c" "$d"; do [[ "$o" -le 255 ]] || return 1; done
-    return 0
-}
-
-ask() { # ask VAR "Prompt" "Default" "Hint"
-    local var="$1" prompt="$2" def="$3" hint="$4" val
-    # Profi-Modus: Umgebungsvariable gewinnt
-    if [[ -n "${!var:-}" ]]; then return 0; fi
-    while true; do
-        echo -e "${BOLD}$prompt${NC}"
-        [[ -n "$hint" ]] && echo -e "  ${YELLOW}Tipp: $hint${NC}"
-        if [[ -n "$def" ]]; then read -rp "  Eingabe [$def]: " val; val="${val:-$def}"
-        else read -rp "  Eingabe: " val; fi
-        printf -v "$var" '%s' "$val"
-        [[ -n "${!var}" ]] && break
-        echo "  Bitte etwas eingeben (oder später mit 'sudo bambu reconfigure' ändern)."
-    done
-}
-
 wizard() {
     local env="$ENV_FILE"
-    title "Schritt 3/6 · Drucker einrichten (einmalig)"
-    echo "Ich brauche 3 Angaben von deinem Bambu Lab A1."
-    echo "Alle findest du wie folgt:"
-    echo "  1. Am Drucker-Display: Einstellungen → Netzwerk → IP-Adresse + Access Code"
-    echo "  2. Seriennummer: Aufkleber am Drucker oder auf der Verpackung"
-    echo "  3. Wichtig: Am Drucker muss der Entwickler-/LAN-Modus AN sein."
+    title "Schritt 3/5 · Grundkonfiguration (Drucker später in der App)"
+    # Wichtig: Druckerdaten werden NICHT mehr auf der Kommandozeile abgefragt.
+    # Der Pi startet ohne Druckerdaten; die iPhone-App scannt und richtet alles ein.
+    ok "Der Drucker wird per iPhone-App eingerichtet — hier musst du nichts eingeben."
     echo ""
-    echo "  Bequemere Alternative: Hier ENTER drücken zum Überspringen und die"
-    echo "  3 Werte später direkt am Drucker stehend per iPhone-App nachtragen"
-    echo "  (App → Einrichtung → Drucker). Der Server startet auch ohne."
-    echo ""
-    # Bestehende Werte laden (für Reconfigure: ENTER behält sie)
+
+    # Profis können die Werte optional per Umgebungsvariable vorgeben.
     local old_host="" old_serial="" old_code=""
     if [[ -f "$ENV_FILE" ]]; then
         old_host=$(grep "^PRINTER_HOST=" "$ENV_FILE" 2>/dev/null | cut -d= -f2)
         old_serial=$(grep "^PRINTER_SERIAL=" "$ENV_FILE" 2>/dev/null | cut -d= -f2)
         old_code=$(grep "^PRINTER_ACCESS_CODE=" "$ENV_FILE" 2>/dev/null | cut -d= -f2)
     fi
+    PRINTER_HOST="${PRINTER_HOST:-$old_host}"
+    PRINTER_SERIAL="${PRINTER_SERIAL:-$old_serial}"
+    PRINTER_ACCESS_CODE="${PRINTER_ACCESS_CODE:-$old_code}"
 
-    if [[ -z "${PRINTER_HOST:-}" ]]; then
-        # Default ist ÜBERSPRINGEN: einfach ENTER hämmern → alles später per App.
-        # Nur wer jetzt tippen will, drückt j.
-        if [[ -n "$old_host" ]]; then
-            echo "  Gespeichert ist bereits: $old_host (Seriennummer ${old_serial:-?})"
-        fi
-        read -rp "  Jetzt eingeben (j) oder später per iPhone (Enter)? [Enter]: " _when
-        if [[ "$_when" != "j" && "$_when" != "J" ]]; then
-            if [[ -n "$old_host" ]]; then
-                log "Behalte bisherige Druckerdaten ($old_host) — weiter geht's."
-                return 0
-            fi
-            log "Übersprungen — Drucker wird später per iPhone eingerichtet."
-            # Leere Platzhalter schreiben, API-Token trotzdem erzeugen
-            if [[ -z "${API_TOKEN:-}" ]]; then
-                API_TOKEN=$(grep "^API_TOKEN=" "$env" 2>/dev/null | cut -d= -f2)
-                [[ -z "$API_TOKEN" || "$API_TOKEN" == "your-secure-api-token-here" ]] && API_TOKEN=$(openssl rand -hex 32)
-            fi
-            cp "$INSTALL_DIR/pi_backend/.env.example" "$env" 2>/dev/null || true
-            sed -i "s|^API_TOKEN=.*|API_TOKEN=$API_TOKEN|" "$env"
-            sed -i "s|^PRINTER_HOST=.*|PRINTER_HOST=|" "$env"
-            chown "$SERVICE_USER:$SERVICE_USER" "$env"; chmod 600 "$env"
-            ok "Platzhalter gespeichert — weiter geht's"
-            return 0
-        fi
-    fi
-
-    while true; do
-        ask PRINTER_HOST "Wie lautet die IP-Adresse des Druckers? (z. B. 192.168.1.50)" "$old_host" "Muss mit 192.168. oder 10. oder 172. anfangen (Heimnetz)."
-        valid_ip "$PRINTER_HOST" && break
-        echo "  Das sieht nicht wie eine IP-Adresse aus — bitte prüfen."
-        unset PRINTER_HOST
-    done
-
-    ask PRINTER_SERIAL "Wie lautet die Seriennummer?" "$old_serial" "Steht auf dem Aufkleber, z. B. 01S00A…"
-    while true; do
-        ask PRINTER_ACCESS_CODE "Wie lautet der 8-stellige Access Code?" "$old_code" "Am Drucker-Display unter Netzwerk."
-        [[ "${#PRINTER_ACCESS_CODE}" -eq 8 ]] && break
-        echo "  Der Code hat genau 8 Zeichen — bitte prüfen."
-        unset PRINTER_ACCESS_CODE
-    done
-
-    # Erreichbarkeit prüfen (freundlich, kein Abbruch)
-    title "Drucker wird gesucht …"
-    if ping -c1 -W3 "$PRINTER_HOST" >/dev/null 2>&1; then
-        ok "Drucker antwortet auf Ping ($PRINTER_HOST)"
-        if timeout 6 bash -c "</dev/tcp/$PRINTER_HOST/8883" 2>/dev/null; then
-            ok "Drucker-MQTT (Port 8883) erreichbar — sehr gutes Zeichen."
-        else
-            warn "Port 8883 antwortet nicht. Mögliche Gründe: Drucker aus/gedruckt gerade? LAN-/Entwicklermodus am Drucker prüfen. Ich installiere trotzdem weiter — später mit 'sudo bambu reconfigure' korrigierbar."
-        fi
-    else
-        warn "Drucker antwortet nicht auf Ping. Bist du im gleichen WLAN? IP prüfen! Ich installiere trotzdem weiter."
-    fi
-
-    # Tailscale-Key optional
-    if [[ -z "${TAILSCALE_AUTHKEY:-}" ]]; then
-        echo ""
-        echo -e "${BOLD}Tailscale für weltweiten iPhone-Zugriff (optional, empfohlen)${NC}"
-        echo "  Mit Key geht alles automatisch. Ohne Key zeige ich dir gleich einen Login-Link."
-        echo "  Key erstellen (30 Sek.): https://login.tailscale.com/admin/settings/keys"
-        read -rp "  Auth-Key (Enter = überspringen): " TAILSCALE_AUTHKEY
-    fi
-
-    # API-Token: behalten oder neu
+    # API-Token: behalten oder neu erzeugen
     if [[ -z "${API_TOKEN:-}" ]]; then
         API_TOKEN=$(grep "^API_TOKEN=" "$ENV_FILE" 2>/dev/null | cut -d= -f2)
         [[ -z "$API_TOKEN" || "$API_TOKEN" == "your-secure-api-token-here" ]] && API_TOKEN=$(openssl rand -hex 32)
@@ -262,7 +185,7 @@ wizard() {
     local tmp
     tmp=$(mktemp)
     {
-        echo "# Automatisch erstellt von install.sh — nicht von Hand ändern, nutze: sudo bambu reconfigure"
+        echo "# Automatisch erstellt von install.sh — Druckerdaten kommen aus der App."
         echo "PRINTER_HOST=$PRINTER_HOST"
         echo "PRINTER_SERIAL=$PRINTER_SERIAL"
         echo "PRINTER_ACCESS_CODE=$PRINTER_ACCESS_CODE"
@@ -272,20 +195,19 @@ wizard() {
         echo "PORT=8000"
         echo "LOG_LEVEL=INFO"
         echo "API_TOKEN=$API_TOKEN"
-        echo "TAILSCALE_AUTHKEY=${TAILSCALE_AUTHKEY:-}"
         echo "# CAMERA_URL="
     } > "$tmp"
     mkdir -p "$(dirname "$ENV_FILE")"
     mv "$tmp" "$ENV_FILE"
     chown "$SERVICE_USER:$SERVICE_USER" "$ENV_FILE"
     chmod 600 "$ENV_FILE"
-    ok "Drucker-Konfiguration gespeichert"
+    ok "Zugangs-Token gespeichert"
 }
 
 # ------------------------------------------------------------- mdns ---
 
 setup_mdns() {
-    title "Schritt 4/6 · iPhone-Findung einrichten (Auto-Discovery)"
+    title "Schritt 4/5 · iPhone-Findung einrichten (Auto-Discovery)"
     # Die App findet den Pi ohne IP-Eingabe per mDNS `_bambu-pi._tcp`.
     # Früher kam das aus dem Flash-Image — jetzt richtet es der Installer ein.
     local src="$INSTALL_DIR/pi_helpers/bambu-pi-avahi.service"
@@ -300,73 +222,25 @@ setup_mdns() {
     fi
 }
 
-# ------------------------------------------------------------- tailscale ---
-
-setup_tailscale() {
-    title "Schritt 5/6 · Weltweiten Zugriff einrichten (Tailscale)"
-    local ts_key
-    ts_key=$(grep "^TAILSCALE_AUTHKEY=" "$ENV_FILE" 2>/dev/null | cut -d= -f2)
-
-    if [[ -n "$ts_key" ]]; then
-        log "Verbinde mit Auth-Key …"
-        tailscale up --authkey="$ts_key" --hostname=bambu-pi --accept-routes >/dev/null 2>&1 || true
-        sleep 3
-    else
-        if [[ ! -t 0 ]]; then
-            warn "Nicht interaktiv — Tailscale-Login übersprungen (nur Heimnetz). Später: 'sudo tailscale up'."
-            TAILSCALE_IP=""; return 0
-        fi
-        echo ""
-        echo "  Gleich startet der Tailscale-Login per Link (Handy/PC, 1 Minute)."
-        read -rp "  Jetzt verbinden (Enter) oder später (n)? [Enter]: " _ts_now
-        if [[ "$_ts_now" == "n" || "$_ts_now" == "N" ]]; then
-            warn "Tailscale übersprungen — nur Heimnetz. Später: 'sudo tailscale up'."
-            TAILSCALE_IP=""; return 0
-        fi
-        log "Starte Tailscale-Login …"
-        rm -f /tmp/ts_up.log
-        tailscale up --hostname=bambu-pi >/tmp/ts_up.log 2>&1 &
-        local ts_pid=$!
-        local url=""
-        for _ in $(seq 1 12); do
-            sleep 5
-            url=$(grep -o 'https://login\.tailscale\.com[^ ]*' /tmp/ts_up.log 2>/dev/null | head -1)
-            tailscale ip -4 >/dev/null 2>&1 && break
-            kill -0 "$ts_pid" 2>/dev/null || break
-        done
-        if tailscale ip -4 >/dev/null 2>&1; then
-            ok "Tailscale ist schon verbunden"
-            kill "$ts_pid" 2>/dev/null || true
-        elif [[ -n "$url" ]]; then
-            echo ""
-            echo -e "${YELLOW}${BOLD}  ➜ BITTE JETZT: Öffne auf Handy oder PC diesen Link und logge dich ein:${NC}"
-            echo -e "${BOLD}  $url${NC}"
-            echo ""
-            echo "  Ich warte bis zu 3 Minuten … (einfach einloggen, hier passiert es automatisch)"
-            for _ in $(seq 1 36); do
-                sleep 5
-                if tailscale ip -4 >/dev/null 2>&1; then break; fi
-                kill -0 "$ts_pid" 2>/dev/null || break
-            done
-            wait "$ts_pid" 2>/dev/null || true
-        else
-            warn "Konnte keinen Login-Link erzeugen — prüfe 'sudo tailscale status' manuell."
-        fi
-    fi
-
-    local ts_ip
-    ts_ip=$(tailscale ip -4 2>/dev/null || echo "")
-    if [[ -n "$ts_ip" ]]; then ok "Tailscale verbunden: $ts_ip (weltweit erreichbar)"; TAILSCALE_IP="$ts_ip"
-    else warn "Tailscale nicht verbunden — Zugriff nur im Heimnetz. Später: 'sudo tailscale up' oder 'sudo bambu reconfigure'."; TAILSCALE_IP=""; fi
-}
-
 # ---------------------------------------------------------------- deploy ---
 
+fix_data_perms() {
+    # Bestehende Installationen: das Volume /data wurde früher als root
+    # angelegt, wodurch die App pairing.json nicht schreiben konnte (HTTP 500).
+    # Einmalig als root korrigieren — harmlos, wenn es schon passt.
+    log "Prüfe Daten-Rechte …"
+    ( cd "$INSTALL_DIR" && sudo -u "$SERVICE_USER" docker compose run --rm -T --no-deps \
+        --user root --entrypoint /bin/sh bambu-controller \
+        -c 'chown -R appuser:appuser /data 2>/dev/null || true' ) >/dev/null 2>&1 || true
+}
+
 deploy() {
-    title "Schritt 6/6 · Server starten"
-    log "Baue und starte (erster Start lädt Docker-Bilder, dauert ein paar Minuten) …"
+    title "Schritt 5/5 · Server starten"
+    log "Baue und starte (erster Start lädt Docker-Bilder inkl. Slicer, dauert ein paar Minuten) …"
     cd "$INSTALL_DIR"
-    sudo -u "$SERVICE_USER" docker compose up -d --build || err "Start fehlgeschlagen. Details: sudo bambu logs"
+    sudo -u "$SERVICE_USER" docker compose build || err "Build fehlgeschlagen. Details: sudo bambu logs"
+    fix_data_perms
+    sudo -u "$SERVICE_USER" docker compose up -d || err "Start fehlgeschlagen. Details: sudo bambu logs"
     log "Warte, bis der Server antwortet …"
     local ok_health=0
     for _ in $(seq 1 40); do
@@ -379,28 +253,30 @@ deploy() {
         health=$(curl -sf http://localhost:8000/health 2>/dev/null || echo "")
         echo "  $health" | grep -q '"printer_connected":true' \
             && ok "Drucker verbunden!" \
-            || warn "Server läuft, Drucker meldet sich noch nicht. Drucker an? IP/Code prüfen mit 'sudo bambu reconfigure'. Logs: 'sudo bambu logs'."
+            || warn "Server läuft, Drucker meldet sich noch nicht. Einrichtung läuft komplett in der iPhone-App (Pi antippen → Verbinden → Drucker). Logs: 'sudo bambu logs'."
     else
         err "Server antwortet nicht. Details ansehen mit: sudo bambu logs"
     fi
 }
 
 write_iphone_sheet() {
-    local lan_ip ts_ip api_token server_url
+    # Lokal bleiben: Heimnetz-IP zuerst. Tailscale (von unterwegs) kommt
+    # später in der App dazu — nicht schon bei der Einrichtung.
+    local lan_ip api_token server_url
     lan_ip=$(hostname -I 2>/dev/null | awk '{print $1}')
-    ts_ip=$(tailscale ip -4 2>/dev/null || echo "")
     api_token=$(grep "^API_TOKEN=" "$ENV_FILE" | cut -d= -f2)
-    if [[ -n "$ts_ip" ]]; then server_url="http://$ts_ip:8000"; else server_url="http://$lan_ip:8000"; fi
+    server_url="http://$lan_ip:8000"
     {
         echo "Bambu Pi Controller — iPhone Einrichtung"
         echo "========================================"
         echo ""
-        echo "In der iPhone-App (Einrichtung oder Einstellungen) eintragen:"
+        echo "Normalfall: App öffnen, den Pi antippen, 'Verbinden' — nichts tippen."
+        echo "Nur falls der Pi nicht automatisch gefunden wird, diese Werte eingeben:"
         echo ""
         echo "  Server URL:  $server_url"
         echo "  API Token:   $api_token"
         echo ""
-        echo "Dann 'Verbindung testen' → ✅ → Fertig."
+        echo "Fernzugriff von unterwegs: in der App unter Einstellungen → Fernzugriff."
         echo "Diese Datei liegt auf dem Pi: $INSTALL_DIR/IPHONE_SETUP.txt"
         echo "Jederzeit erneut anzeigen mit:  sudo bambu iphone"
     } > "$INSTALL_DIR/IPHONE_SETUP.txt"
@@ -418,10 +294,12 @@ print_summary() {
     echo -e "${BOLD}So geht es auf dem iPhone weiter (1 Minute):${NC}"
     echo "  1. BambuController-App öffnen → Einrichtung starten"
     echo "  2. Dein Pi erscheint von allein -> antippen -> 'Verbinden' (nichts abtippen!)"
-    echo "  3. Nur als Fallback (z. B. unterwegs via Tailscale) diese 2 Werte tippen:"
+    echo "  3. Drucker in der App wählen (der Pi sucht ihn selbst) — fertig."
+    echo "  4. Fernzugriff von unterwegs: App → Einstellungen → Fernzugriff aktivieren."
+    echo ""
+    echo "  Falls der Pi nicht automatisch gefunden wird, diese 2 Werte eingeben:"
     echo -e "     ${BOLD}Server URL:${NC}  $IPHONE_URL"
     echo -e "     ${BOLD}API Token:${NC}   $IPHONE_TOKEN"
-    echo "  4. 'Verbindung testen' → ✅ → 'Fertig'"
     echo ""
     if command -v qrencode &>/dev/null; then
         echo "  QR-Code für die Server-URL (Token danach abtippen):"
@@ -433,7 +311,8 @@ print_summary() {
     echo "  sudo bambu iphone       Diese iPhone-Anleitung erneut anzeigen"
     echo "  sudo bambu logs         Live-Protokoll ansehen"
     echo "  sudo bambu update       Auf neueste Version aktualisieren"
-    echo "  sudo bambu reconfigure  Druckerdaten korrigieren"
+    echo "  sudo bambu reconfigure  Zugangs-Token neu erzeugen"
+    echo "  sudo bambu tailscale    Fernzugriff per Tailscale-Login aktivieren"
 }
 
 # ------------------------------------------------------------------ main ---
@@ -457,7 +336,9 @@ main() {
             chmod +x /usr/local/bin/bambu
         fi
         setup_mdns
-        sudo -u "$SERVICE_USER" docker compose up -d --build
+        sudo -u "$SERVICE_USER" docker compose build
+        fix_data_perms
+        sudo -u "$SERVICE_USER" docker compose up -d
         ok "Aktualisiert."
         exit 0
     fi
@@ -468,7 +349,9 @@ main() {
         wizard
         setup_mdns
         cd "$INSTALL_DIR"
-        sudo -u "$SERVICE_USER" docker compose up -d --build
+        sudo -u "$SERVICE_USER" docker compose build
+        fix_data_perms
+        sudo -u "$SERVICE_USER" docker compose up -d
         ok "Neu konfiguriert und neu gestartet."
         print_summary
         exit 0
@@ -482,8 +365,6 @@ main() {
     setup_user_repo
     wizard
     setup_mdns
-    setup_tailscale
-    check_slicer
     deploy
     print_summary
 }

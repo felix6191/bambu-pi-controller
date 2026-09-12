@@ -11,6 +11,9 @@ struct SettingsView: View {
     @State private var showPiSearch = false
     @State private var repairResult: String?
     @State private var repairing = false
+    @State private var remote: RemoteAccessStatus?
+    @State private var remoteBusy = false
+    @Environment(\.openURL) private var openURL
     @ObservedObject private var vm = PrinterViewModel.shared
 
     var body: some View {
@@ -27,6 +30,8 @@ struct SettingsView: View {
                         if vm.isDemo { Pill(text: "DEMO", color: .purple) }
                     }
                 } header: { Text("Status") }
+
+                remoteAccessSection
 
                 Section {
                     Button { showPiSearch = true } label: {
@@ -130,7 +135,101 @@ struct SettingsView: View {
             .fullScreenCover(isPresented: $showOnboarding) {
                 ReOnboardingHost()
             }
-            .onAppear { settings = AppSettings.shared }
+            .onAppear {
+                settings = AppSettings.shared
+                Task { await loadRemote() }
+            }
+        }
+    }
+
+    // MARK: - Fernzugriff (Tailscale)
+
+    @ViewBuilder
+    private var remoteAccessSection: some View {
+        Section {
+            HStack {
+                Image(systemName: remoteIcon)
+                    .foregroundColor(remoteColor)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(remoteTitle).font(.subheadline).fontWeight(.medium)
+                    if let m = remote?.message, !m.isEmpty {
+                        Text(m).font(.caption).foregroundColor(.secondary)
+                    }
+                }
+                Spacer()
+                if remoteBusy { ProgressView() }
+            }
+            if let r = remote, r.isRunning, let ip = r.tailscaleIp {
+                Button {
+                    var s = AppSettings.shared
+                    s.serverURL = "http://\(ip):8000"
+                    s.useTailscale = true
+                    s.commit()
+                    settings = AppSettings.shared
+                    WebSocketService.shared.disconnect()
+                    if s.autoConnect { WebSocketService.shared.connect() }
+                } label: {
+                    Text("Diese Adresse jetzt nutzen (\(ip))")
+                }
+            } else if remote?.installed == false {
+                Text("Tailscale fehlt auf dem Pi. Einmal am Pi ausführen: sudo bambu tailscale")
+                    .font(.caption).foregroundColor(.secondary)
+            } else {
+                Button {
+                    Task { await enableRemote() }
+                } label: {
+                    if remoteBusy { ProgressView().frame(maxWidth: .infinity) }
+                    else { Text("Fernzugriff aktivieren").frame(maxWidth: .infinity) }
+                }
+                .disabled(remoteBusy || vm.isDemo)
+            }
+        } header: {
+            Text("Fernzugriff (Tailscale)")
+        } footer: {
+            HintText(text: "Erst nötig, wenn du von unterwegs zugreifen willst. Zuhause reicht das Heimnetz. Beim Aktivieren öffnet sich einmalig die Tailscale-Anmeldung.")
+        }
+    }
+
+    private var remoteTitle: String {
+        guard let r = remote else { return "Nicht geprüft" }
+        if !r.installed { return "Nicht verfügbar" }
+        if r.isRunning { return "Aktiv" }
+        if !(r.authUrl ?? "").isEmpty { return "Anmeldung offen" }
+        return "Nicht verbunden"
+    }
+    private var remoteIcon: String {
+        (remote?.isRunning ?? false) ? "checkmark.circle.fill" : "network.slash"
+    }
+    private var remoteColor: Color {
+        (remote?.isRunning ?? false) ? .green : .secondary
+    }
+
+    private func loadRemote() async {
+        guard !vm.isDemo else { return }
+        remote = try? await APIService.shared.remoteAccessStatus()
+    }
+
+    private func enableRemote() async {
+        remoteBusy = true; defer { remoteBusy = false }
+        do {
+            let r = try await APIService.shared.enableRemoteAccess()
+            remote = r
+            if let link = r.authUrl, let url = URL(string: link) {
+                openURL(url)   // Anmeldung im Browser; danach Status erneut prüfen
+                Task {
+                    for _ in 0..<6 {
+                        try? await Task.sleep(nanoseconds: 5_000_000_000)
+                        await loadRemote()
+                        if remote?.isRunning == true { break }
+                    }
+                }
+            } else if r.isRunning {
+                remote = try? await APIService.shared.remoteAccessStatus()
+            }
+        } catch {
+            remote = RemoteAccessStatus(installed: true, state: "error",
+                                        authUrl: nil, tailscaleIp: nil,
+                                        message: error.localizedDescription)
         }
     }
 

@@ -116,6 +116,14 @@ class APIService: ObservableObject {
         try await request("/system/printer-scan", method: "POST", PrinterScanResult.self)
     }
 
+    // Fernzugriff (Tailscale) — Login läuft später aus der App
+    func remoteAccessStatus() async throws -> RemoteAccessStatus {
+        try await request("/system/remote-access", RemoteAccessStatus.self)
+    }
+    func enableRemoteAccess() async throws -> RemoteAccessStatus {
+        try await request("/system/remote-access", method: "POST", RemoteAccessStatus.self)
+    }
+
     // Repair: Pi für ein neues Handy freigeben (Druckerconfig bleibt)
     func resetPairing() async throws -> APIResponse {
         try await request("/pairing/reset", method: "POST", APIResponse.self)

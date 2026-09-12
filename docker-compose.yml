@@ -5,22 +5,20 @@ services:
       dockerfile: Dockerfile
     container_name: bambu-controller
     restart: unless-stopped
+    # Wichtig: NICHT zusätzlich environment: PRINTER_* / API_TOKEN setzen —
+    # das würde die Werte aus der .env mit leeren Host-Variablen überschreiben.
     env_file:
       - path: ./pi_backend/.env
         required: false
     volumes:
       - bambu-data:/data
+      # Fernzugriff (Tailscale) wird bei Bedarf aus der App gestartet:
+      # Host-CLI + Socket in den Container reichen, kein zweiter Container.
+      - /usr/bin/tailscale:/usr/local/bin/tailscale:ro
+      - /var/run/tailscale:/var/run/tailscale
     environment:
       - STORAGE_DIR=/data
-      - PRINTER_HOST=${PRINTER_HOST}
-      - PRINTER_SERIAL=${PRINTER_SERIAL}
-      - PRINTER_ACCESS_CODE=${PRINTER_ACCESS_CODE}
-      - API_TOKEN=${API_TOKEN}
-      - CAMERA_URL=${CAMERA_URL}
-      - CAMERA_USERNAME=${CAMERA_USERNAME}
-      - CAMERA_PASSWORD=${CAMERA_PASSWORD}
       - LOG_LEVEL=INFO
-      - SLICER_CMD=${SLICER_CMD}
       - MAX_UPLOAD_MB=${MAX_UPLOAD_MB:-200}
     ports:
       - "8000:8000"
@@ -31,25 +29,11 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
-
-  tailscale:
-    image: tailscale/tailscale:latest
-    container_name: tailscale
-    restart: unless-stopped
-    cap_add: [NET_ADMIN, SYS_MODULE]
-    devices: ["/dev/net/tun:/dev/net/tun"]
-    volumes:
-      - tailscale-state:/var/lib/tailscale
-    environment:
-      - TAILSCALE_AUTHKEY=${TAILSCALE_AUTHKEY}
-      - TAILSCALE_HOSTNAME=bambu-pi
-    network_mode: host
+      start_period: 60s
 
 networks:
   bambu-network:
     driver: bridge
 
 volumes:
-  tailscale-state:
   bambu-data:

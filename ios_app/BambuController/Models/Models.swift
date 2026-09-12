@@ -394,6 +394,24 @@ struct PrinterScanResult: Codable {
     let candidates: [PrinterCandidate]
 }
 
+// MARK: - Fernzugriff (Tailscale), aus der App gestartet
+
+struct RemoteAccessStatus: Codable {
+    let installed: Bool
+    let state: String
+    let authUrl: String?
+    let tailscaleIp: String?
+    let message: String
+
+    enum CodingKeys: String, CodingKey {
+        case installed, state, message
+        case authUrl = "auth_url"
+        case tailscaleIp = "tailscale_ip"
+    }
+
+    var isRunning: Bool { state == "Running" && !(tailscaleIp ?? "").isEmpty }
+}
+
 // MARK: - WebSocket Messages
 
 struct WSMessage: Codable { let type: String; let data: WSData? }

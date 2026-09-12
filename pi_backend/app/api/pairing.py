@@ -48,7 +48,12 @@ def _read_pairing() -> dict:
 
 
 def _write_pairing(data: dict) -> None:
-    _pairing_file().write_text(json.dumps(data), encoding="utf-8")
+    # Ein fehlgeschlagener Schreibvorgang darf die App nie mit HTTP 500
+    # abweisen — dann lieber im Speicher weiterarbeiten.
+    try:
+        _pairing_file().write_text(json.dumps(data), encoding="utf-8")
+    except Exception as e:
+        logger.error(f"pairing write failed ({_pairing_file()}): {e}")
 
 
 def _env_file() -> Path:
@@ -72,7 +77,7 @@ def is_paired() -> bool:
 
 
 def _ensure_token() -> str:
-    """Token erzeugen+persistieren, falls das Image keins hinterlegt hat."""
+    """Token aus der Umgebung liefern; notfalls eines erzeugen (nur im Speicher)."""
     if settings.api_token:
         return settings.api_token
     env = _env_file()
@@ -86,24 +91,12 @@ def _ensure_token() -> str:
                         return tok
     except Exception:
         pass
+    # Kein Token hinterlegt (z. B. Installer übersprungen): erzeugen und im
+    # Speicher setzen. Nichts in Dateien schreiben — das ist Aufgabe des
+    # Installers, nicht des Containers.
     tok = secrets.token_hex(32)
     settings.api_token = tok
-    try:
-        lines: list[str] = []
-        seen = False
-        if env.exists():
-            for line in env.read_text(encoding="utf-8").splitlines():
-                if line.startswith("API_TOKEN="):
-                    lines.append(f"API_TOKEN={tok}")
-                    seen = True
-                else:
-                    lines.append(line)
-        if not seen:
-            lines.append(f"API_TOKEN={tok}")
-        env.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        os.chmod(env, 0o600)
-    except Exception as e:
-        logger.error(f"token persist failed: {e}")
+    logger.warning("No API_TOKEN configured — generated a temporary one for this session")
     return tok
 
 

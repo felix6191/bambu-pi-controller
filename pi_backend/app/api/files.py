@@ -306,6 +306,110 @@ def _render_overrides(job: SliceJob, job_dir: Path) -> Path:
     return out
 
 
+# --------------------------------------------------------------- OrcaSlicer ---
+# OrcaSlicer (ARM64) bringt fertige Bambu-A1-Profile mit. Wir nutzen diese
+# direkt und legen nur noch die App-Optionen als Override-JSON obendrauf.
+_ORCA_QUALITY = {
+    "draft": ["0.28mm Extra Draft @BBL A1.json", "0.24mm Optimal @BBL A1.json",
+              "0.20mm Standard @BBL A1.json"],
+    "standard": ["0.20mm Standard @BBL A1.json", "0.20mm Optimal @BBL A1.json",
+                 "0.16mm Optimal @BBL A1.json"],
+    "fine": ["0.12mm Fine @BBL A1.json", "0.10mm Optimal @BBL A1.json",
+             "0.08mm Extra Fine @BBL A1.json"],
+}
+_ORCA_FILAMENT = {
+    "pla": ["Bambu PLA Basic @BBL A1.json", "Bambu PLA Matte @BBL A1.json"],
+    "petg": ["Bambu PETG Basic @BBL A1.json", "Bambu PETG HF @BBL A1.json"],
+    "tpu": ["Bambu TPU 95A @BBL A1.json", "Bambu TPU for AMS @BBL A1.json"],
+    "asa": ["Bambu ASA @BBL A1.json", "Generic ASA @BBL A1.json"],
+}
+
+
+def _orca_mode() -> bool:
+    return str(settings.slicer_mode or "").lower() == "orca"
+
+
+def _orca_root() -> Path:
+    """Profilordner finden — der Pfad im AppImage variiert je nach Build."""
+    configured = Path(settings.orca_profiles)
+    candidates = [
+        configured,
+        Path("/opt/orcaslicer/resources/profiles/BBL"),
+        Path("/opt/orcaslicer/usr/share/orcaslicer/resources/profiles/BBL"),
+        Path("/opt/orcaslicer/usr/share/OrcaSlicer/resources/profiles/BBL"),
+        Path("/opt/orcaslicer/usr/share/orca-slicer/resources/profiles/BBL"),
+    ]
+    for c in candidates:
+        if (c / "machine").is_dir():
+            return c
+    base = Path("/opt/orcaslicer")
+    if base.is_dir():
+        for match in sorted(base.glob("**/profiles/BBL")):
+            if (match / "machine").is_dir():
+                return match
+    return configured
+
+
+def _orca_find(category: str, candidates: list[str], fallback_glob: str) -> Path | None:
+    root = _orca_root() / category
+    for name in candidates:
+        if (root / name).exists():
+            return root / name
+    matches = sorted(root.glob(fallback_glob))
+    return matches[0] if matches else None
+
+
+def _write_orca_overrides(job: SliceJob, job_dir: Path) -> Path:
+    data: dict[str, str] = {
+        "sparse_infill_density": f"{max(0, min(100, job.infill))}%",
+        "sparse_infill_pattern": "grid",
+        "enable_support": "1" if job.supports else "0",
+    }
+    if job.adv_layer_height > 0:
+        lh = max(0.08, min(0.28, job.adv_layer_height))
+        data["layer_height"] = f"{lh}"
+        data["initial_layer_print_height"] = f"{lh}"
+    if job.adv_walls > 0:
+        data["wall_loops"] = str(max(1, min(5, job.adv_walls)))
+    if job.adv_brim >= 0:
+        data["brim_type"] = "auto_brim" if job.adv_brim else "no_brim"
+    if job.adv_nozzle > 0:
+        nt = max(150, min(MAX_NOZZLE_C, job.adv_nozzle))
+        data["nozzle_temperature"] = str(nt)
+        data["nozzle_temperature_initial_layer"] = str(nt)
+    if job.adv_bed >= 0:
+        bt = max(0, min(MAX_BED_C, job.adv_bed))
+        for key in ("hot_plate_temp", "hot_plate_temp_initial_layer",
+                    "textured_plate_temp", "textured_plate_temp_initial_layer"):
+            data[key] = str(bt)
+    out = job_dir / "orca_overrides.json"
+    out.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    return out
+
+
+def _orca_command(job: SliceJob, src: Path, job_dir: Path) -> list[str]:
+    machine = _orca_find("machine", ["Bambu Lab A1 0.4 nozzle.json"], "*A1*0.4*nozzle*.json")
+    process = _orca_find("process", _ORCA_QUALITY.get(job.quality.lower(), []), "*@BBL A1.json")
+    filament = _orca_find("filament", _ORCA_FILAMENT.get(job.filament.lower(), []),
+                          f"*{job.filament.upper()}*@BBL A1.json")
+    if machine is None or process is None or filament is None:
+        raise RuntimeError(
+            "OrcaSlicer-Profile nicht gefunden — ist der Slicer im Image? "
+            f"(gesucht in {_orca_root()})"
+        )
+    overrides = _write_orca_overrides(job, job_dir)
+    settings_arg = ";".join(str(p) for p in (machine, process, overrides))
+    return [
+        _slicer_cmd(),
+        "--load-settings", settings_arg,
+        "--load-filaments", str(filament),
+        "--arrange", "1",
+        "--slice", "0",
+        "--outputdir", str(job_dir),
+        str(src),
+    ]
+
+
 async def _run_slice(job: SliceJob) -> None:
     """Background worker: slice exactly one job at a time."""
     async with _WORKER_LOCK:
@@ -330,38 +434,49 @@ async def _run_slice(job: SliceJob) -> None:
             except OSError:
                 raise RuntimeError("Upload-Datei nicht lesbar")
 
-            machine = _render_machine_profile(
-                job.filament, job_dir,
-                nozzle=job.adv_nozzle or None,
-                bed=job.adv_bed if job.adv_bed >= 0 else None,
-            )
-            filament = profiles_dir() / f"filament_{job.filament.lower()}.ini"
-            process = profiles_dir() / f"process_{job.quality.lower()}.ini"
-            if not filament.exists():
-                raise RuntimeError(f"Filament-Profil '{job.filament}' fehlt")
-            if not process.exists():
-                raise RuntimeError(f"Qualitäts-Profil '{job.quality}' fehlt")
-            overrides = _render_overrides(job, job_dir)
-            out = job_dir / f"{_safe_stem(job.filename)}.gcode"
-
-            cmd = _slicer_cmd()
-            if shutil.which(shlex.split(cmd)[0]) is None:
-                raise RuntimeError(
-                    f"Slicer '{cmd}' nicht auf dem Pi installiert. "
-                    "ARM64-Build (PrusaSlicer/OrcaSlicer) installieren und ggf. SLICER_CMD/SLICER_TEMPLATE setzen — siehe README."
+            use_orca = _orca_mode()
+            prusa_out: Path | None = None
+            if use_orca:
+                cmd = _slicer_cmd()
+                if shutil.which(shlex.split(cmd)[0]) is None:
+                    raise RuntimeError(
+                        "OrcaSlicer ist im Image nicht installiert. Einmal neu bauen mit 'sudo bambu update'."
+                    )
+                argv = _orca_command(job, src, job_dir)
+            else:
+                machine = _render_machine_profile(
+                    job.filament, job_dir,
+                    nozzle=job.adv_nozzle or None,
+                    bed=job.adv_bed if job.adv_bed >= 0 else None,
                 )
-            # Pfade quoten, dann in argv zerlegen -> kein shell=True, kein
-            # Breakout über Leerzeichen/Sonderzeichen in Dateinamen.
-            command = _slicer_template().format(
-                cmd=cmd, out=shlex.quote(str(out)), machine=shlex.quote(str(machine)),
-                filament=shlex.quote(str(filament)), process=shlex.quote(str(process)),
-                overrides=shlex.quote(str(overrides)), input=shlex.quote(str(src)),
-            )
-            # Load overrides too (harmless if slicer ignores the extra --load)
-            if "--load {overrides}" not in os.environ.get("SLICER_TEMPLATE", ""):
-                command = command.replace(shlex.quote(str(process)), f"{shlex.quote(str(process))} --load {shlex.quote(str(overrides))}")
-            argv = shlex.split(command)
-            logger.info(f"Slicing {job.id}: {' '.join(argv[:4])} … ({job.filename})")
+                filament = profiles_dir() / f"filament_{job.filament.lower()}.ini"
+                process = profiles_dir() / f"process_{job.quality.lower()}.ini"
+                if not filament.exists():
+                    raise RuntimeError(f"Filament-Profil '{job.filament}' fehlt")
+                if not process.exists():
+                    raise RuntimeError(f"Qualitäts-Profil '{job.quality}' fehlt")
+                overrides = _render_overrides(job, job_dir)
+                prusa_out = job_dir / f"{_safe_stem(job.filename)}.gcode"
+
+                cmd = _slicer_cmd()
+                if shutil.which(shlex.split(cmd)[0]) is None:
+                    raise RuntimeError(
+                        f"Slicer '{cmd}' nicht installiert. "
+                        "SLICER_CMD/SLICER_TEMPLATE prüfen — siehe README."
+                    )
+                # Pfade quoten, dann in argv zerlegen -> kein shell=True, kein
+                # Breakout über Leerzeichen/Sonderzeichen in Dateinamen.
+                command = _slicer_template().format(
+                    cmd=cmd, out=shlex.quote(str(prusa_out)), machine=shlex.quote(str(machine)),
+                    filament=shlex.quote(str(filament)), process=shlex.quote(str(process)),
+                    overrides=shlex.quote(str(overrides)), input=shlex.quote(str(src)),
+                )
+                # Load overrides too (harmless if slicer ignores the extra --load)
+                if "--load {overrides}" not in os.environ.get("SLICER_TEMPLATE", ""):
+                    command = command.replace(shlex.quote(str(process)), f"{shlex.quote(str(process))} --load {shlex.quote(str(overrides))}")
+                argv = shlex.split(command)
+
+            logger.info(f"Slicing {job.id} ({'orca' if use_orca else 'prusa'}): {job.filename}")
             _set(job, JobStage.SLICING, 15.0)
             await _broadcast(job)
 
@@ -371,8 +486,23 @@ async def _run_slice(job: SliceJob) -> None:
                 lambda: subprocess.run(argv, shell=False, capture_output=True, text=True, timeout=int(os.environ.get("SLICE_TIMEOUT_S", "1800"))),
             )
             tail = (proc.stderr or proc.stdout or "")[-2000:]
-            if proc.returncode != 0 or not out.exists():
-                raise RuntimeError(f"Slicen fehlgeschlagen (Code {proc.returncode}). {tail[-500:]}")
+            if use_orca:
+                # Orca schreibt den G-Code selbst in --outputdir; Namen finden.
+                produced = sorted(job_dir.glob("*.gcode"), key=lambda p: p.stat().st_mtime, reverse=True)
+                if proc.returncode != 0 or not produced:
+                    raise RuntimeError(f"Slicen fehlgeschlagen (Code {proc.returncode}). {tail[-500:]}")
+                out = produced[0]
+                wanted = job_dir / f"{_safe_stem(job.filename)}.gcode"
+                if out != wanted:
+                    try:
+                        out.replace(wanted)
+                        out = wanted
+                    except OSError:
+                        pass
+            else:
+                out = prusa_out  # type: ignore[assignment]
+                if proc.returncode != 0 or not out.exists():
+                    raise RuntimeError(f"Slicen fehlgeschlagen (Code {proc.returncode}). {tail[-500:]}")
 
             ok, reason = _validate_gcode(out)
             if not ok:

@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     camera_url: str | None = Field(default=None, alias="CAMERA_URL")
     camera_username: str | None = Field(default=None, alias="CAMERA_USERNAME")
     camera_password: str | None = Field(default=None, alias="CAMERA_PASSWORD")
+    slicer_mode: str = Field(default="orca", alias="SLICER_MODE")
+    orca_profiles: str = Field(default="/opt/orcaslicer/resources/profiles/BBL", alias="ORCA_PROFILES")
 
 
 settings = Settings()

@@ -1,5 +1,8 @@
 """System API routes."""
 import ipaddress
+import json
+import shutil
+import subprocess
 from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -11,6 +14,9 @@ from app.core.config import settings
 from app.core import state as app_state
 
 router = APIRouter()
+
+TAILSCALE = "tailscale"
+TS_HOSTNAME = "bambu-pi"
 
 
 def _env_file() -> Path:
@@ -95,6 +101,93 @@ async def set_printer_config(request: PrinterConfigRequest):
                                    message="Drucker verbunden! 🎉")
     return PrinterConfigResult(success=True, printer_connected=False,
                                message="Gespeichert, aber Drucker antwortet nicht. Gleiches WLAN? Drucker an? LAN-Modus an?")
+
+
+# ------------------------------------------------------- remote access (Tailscale) ---
+
+class RemoteAccessResult(BaseModel):
+    installed: bool
+    state: str
+    auth_url: str = ""
+    tailscale_ip: str | None = None
+    message: str = ""
+
+
+def _ts_bin() -> str | None:
+    return shutil.which(TAILSCALE)
+
+
+def _ts_status_sync() -> dict | None:
+    """`tailscale status --json` im Host-Netz (Socket ist in den Container gemountet)."""
+    binary = _ts_bin()
+    if binary is None:
+        return None
+    try:
+        proc = subprocess.run([binary, "status", "--json"], capture_output=True, text=True, timeout=6)
+    except Exception:
+        return None
+    if proc.returncode != 0 or not proc.stdout.strip():
+        return None
+    try:
+        return json.loads(proc.stdout)
+    except Exception:
+        return None
+
+
+async def _ts_status() -> dict | None:
+    import asyncio as _aio
+    return await _aio.get_running_loop().run_in_executor(None, _ts_status_sync)
+
+
+def _ts_result(data: dict | None, fallback_msg: str = "") -> RemoteAccessResult:
+    if data is None:
+        return RemoteAccessResult(installed=False, state="unavailable", message=fallback_msg)
+    state = str(data.get("BackendState", "unknown"))
+    auth = str(data.get("AuthURL", "") or "")
+    ips = [ip for ip in (data.get("TailscaleIPs") or []) if ":" not in ip]
+    return RemoteAccessResult(installed=True, state=state, auth_url=auth,
+                              tailscale_ip=(ips[0] if ips else None))
+
+
+@router.get("/remote-access", response_model=RemoteAccessResult)
+async def remote_access_status():
+    """Aktueller Fernzugriff-Status (ohne Login)."""
+    if _ts_bin() is None:
+        return RemoteAccessResult(installed=False, state="unavailable",
+            message="Tailscale fehlt auf dem Pi. Einmal ausführen: sudo bambu tailscale")
+    return _ts_result(await _ts_status(), "Tailscale antwortet nicht. Auf dem Pi: sudo bambu tailscale")
+
+
+@router.post("/remote-access", response_model=RemoteAccessResult)
+async def remote_access_start():
+    """Fernzugriff aus der App starten: `tailscale up` im Hintergrund, Login-Link liefern."""
+    import asyncio as _aio
+    binary = _ts_bin()
+    if binary is None:
+        return RemoteAccessResult(installed=False, state="unavailable",
+            message="Tailscale fehlt auf dem Pi. Einmal ausführen: sudo bambu tailscale")
+    try:
+        subprocess.Popen([binary, "up", "--hostname", TS_HOSTNAME, "--accept-routes"],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception as e:
+        logger.error(f"tailscale up failed: {e}")
+        return RemoteAccessResult(installed=True, state="error", message=f"Start fehlgeschlagen: {e}")
+    # Kurz warten, bis Login-Link oder Verbindung bereitsteht
+    for _ in range(15):
+        data = await _ts_status()
+        if data is not None:
+            state = str(data.get("BackendState", "unknown"))
+            auth = str(data.get("AuthURL", "") or "")
+            ips = [ip for ip in (data.get("TailscaleIPs") or []) if ":" not in ip]
+            if state == "Running" and ips:
+                return RemoteAccessResult(installed=True, state=state, tailscale_ip=ips[0],
+                                          message="Fernzugriff aktiv.")
+            if auth:
+                return RemoteAccessResult(installed=True, state=state, auth_url=auth,
+                                          message="Zum Aktivieren Link öffnen und anmelden.")
+        await _aio.sleep(1)
+    return RemoteAccessResult(installed=True, state="starting",
+                              message="Anmeldung läuft — bitte gleich den Link öffnen.")
 
 
 @router.get("/info")

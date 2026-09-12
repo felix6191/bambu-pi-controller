@@ -2,7 +2,6 @@
 name = "bambu-pi-controller"
 version = "0.1.0"
 description = "Local controller for Bambu Lab A1 3D printer via Raspberry Pi"
-readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi==0.115.0",
