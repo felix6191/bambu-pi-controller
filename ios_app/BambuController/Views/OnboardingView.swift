@@ -54,8 +54,7 @@ struct OnboardingView: View {
             Spacer()
             if step < totalSteps - 1 {
                 Button("Weiter") { withAnimation { step += 1 } }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.primary)
+                    .buttonStyle(PrimaryButtonStyle())
                     .disabled(!stepValid)
             }
         }
@@ -132,7 +131,7 @@ struct OnboardingView: View {
                     if printerSending { ProgressView().frame(maxWidth: .infinity) }
                     else { Text("An Pi senden & verbinden").frame(maxWidth: .infinity) }
                 }
-                .buttonStyle(.borderedProminent).tint(.primary)
+                .buttonStyle(PrimaryButtonStyle())
                 .disabled(printerHost.isEmpty || printerSerial.isEmpty || printerCode.isEmpty || printerSending
                     || settings.serverURL.isEmpty || settings.apiToken.isEmpty)
                 if let r = printerResult {
@@ -179,7 +178,7 @@ struct OnboardingView: View {
                     if testing { ProgressView().frame(maxWidth: .infinity) }
                     else { Text("Verbindung testen").frame(maxWidth: .infinity) }
                 }
-                .buttonStyle(.borderedProminent).tint(.primary)
+                .buttonStyle(PrimaryButtonStyle())
                 .disabled(settings.serverURL.isEmpty || settings.apiToken.isEmpty || testing)
                 if let r = testResult {
                     Text(r).font(.footnote).foregroundColor(r.hasPrefix("✅") ? .green : .red)

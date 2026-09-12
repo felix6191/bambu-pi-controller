@@ -338,7 +338,9 @@ private struct PiSearchSheet: View {
                             VStack(spacing: 8) {
                                 if discovery.searching { ProgressView("Suche läuft …") }
                                 else { Text("Nichts gefunden.").foregroundColor(.secondary) }
-                                Button("Erneut suchen") { discovery.start() }.buttonStyle(.bordered)
+                                Button("Erneut suchen") { discovery.start() }
+                                    .buttonStyle(.bordered)
+                                    .tint(AppTheme.accent)
                             }
                             Spacer()
                         }

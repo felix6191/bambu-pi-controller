@@ -214,7 +214,10 @@ cd ios_app
 ## Troubleshooting
 
 ### Drucker verbindet nicht
-- Entwicklermodus an? IP korrekt? Access Code korrekt?
+- Der Container läuft im **Host-Netz** und scannt das echte Heimnetz (alle /24). Nach dem Update einmal neu bauen: `sudo bambu update`.
+- Am Drucker muss der **LAN-/Entwicklermodus** an sein (nicht Cloud-Modus), sonst antwortet Port 8883 nicht.
+- Entwicklermodus an? IP korrekt? Access Code (8 Zeichen) und Seriennummer korrekt?
+- Der Pi prüft erst, ob Port 8883 offen ist, und unterscheidet in der App „nicht erreichbar" von „erreichbar, aber Zugangsdaten falsch".
 - Logs: `docker compose logs bambu-controller`
 - MQTT testen: `mosquitto_sub -h <PRINTER_IP> -u bblp -P <ACCESS_CODE> -t 'device/+/push'`
 

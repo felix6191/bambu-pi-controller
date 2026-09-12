@@ -1,4 +1,8 @@
 """Application configuration."""
+import json
+import os
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
 
@@ -23,3 +27,28 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def persisted_printer_file() -> Path:
+    return Path(os.environ.get("STORAGE_DIR", "/data")) / "printer_config.json"
+
+
+def _load_persisted_printer() -> None:
+    """In der App eingegebene Druckerdaten liegen im Volume und überleben
+    einen Container-Neubau (die .env im Container wird nicht herangezogen)."""
+    try:
+        path = persisted_printer_file()
+        if not path.exists():
+            return
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if data.get("printer_host"):
+            settings.printer_host = str(data["printer_host"])
+        if data.get("printer_serial"):
+            settings.printer_serial = str(data["printer_serial"])
+        if data.get("printer_access_code"):
+            settings.printer_access_code = str(data["printer_access_code"])
+    except Exception:
+        pass
+
+
+_load_persisted_printer()

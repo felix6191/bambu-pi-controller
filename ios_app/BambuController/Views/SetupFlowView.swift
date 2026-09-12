@@ -52,14 +52,17 @@ struct SetupFlowView: View {
     private var navBar: some View {
         HStack {
             if step > 0 && step < 5 {
-                Button("Zurück") { withAnimation { step -= 1 } }.buttonStyle(.bordered)
+                Button("Zurück") { withAnimation { step -= 1 } }
+                    .buttonStyle(.bordered)
+                    .tint(AppTheme.accent)
             }
             Spacer()
             if step == 0 || step == 5 { EmptyView() }
             else if step < 4 {
                 Button("Weiter") { withAnimation { step += 1 } }
-                    .buttonStyle(.borderedProminent).tint(.primary)
+                    .buttonStyle(PrimaryButtonStyle())
                     .disabled(!stepValid)
+                    .frame(maxWidth: 180)
             }
         }
         .padding()
@@ -119,7 +122,9 @@ struct SetupFlowView: View {
                         VStack(spacing: 8) {
                             if discovery.searching { ProgressView("Suche läuft …") }
                             else { Text("Noch nichts gefunden.").foregroundColor(.secondary) }
-                            Button("Erneut suchen") { discovery.start() }.buttonStyle(.bordered)
+                            Button("Erneut suchen") { discovery.start() }
+                                .buttonStyle(.bordered)
+                                .tint(AppTheme.accent)
                         }
                         Spacer()
                     }
@@ -146,7 +151,9 @@ struct SetupFlowView: View {
                 }
                 if let e = pairError { Text(e).font(.footnote).foregroundColor(.red) }
                 if !settings.serverURL.isEmpty {
-                    Text("✅ Verbunden: \(settings.serverURL)").font(.footnote).foregroundColor(.green)
+                    Text("✅ Pi antwortet und nimmt Befehle an: \(settings.serverURL)").font(.footnote).foregroundColor(.green)
+                } else {
+                    Text("Tippe oben auf deinen Pi, um weiterzumachen.").font(.footnote).foregroundColor(.secondary)
                 }
                 HintText(text: "Pi unsichtbar? Gleiches WLAN prüfen (kein Gast-WLAN), 2 Minuten warten, erneut suchen.")
             }
@@ -168,9 +175,25 @@ struct SetupFlowView: View {
                 settings.apiToken = claim.apiToken
                 settings.demoWanted = false
                 settings.commit()
+                // Pflicht-Check: Kann die App einen Befehl an den Pi schicken
+                // und bekommt sie eine Antwort? (Token/Pi wirklich erreichbar?)
+                do {
+                    _ = try await APIService.shared.getPrinterConfig()
+                } catch {
+                    pairError = "Pi gefunden, antwortet aber nicht auf Befehle (\(error.localizedDescription)). Gleiches WLAN? Erneut suchen."
+                    return
+                }
                 withAnimation { step = 2 }
                 return
-            } catch { last = error; try? await Task.sleep(nanoseconds: UInt64(attempt) * 1_500_000_000) }
+            } catch {
+                // 403 = schon vergeben → NICHT erneut claimen
+                if let e = error as? APIError, case .httpError(403, _) = e {
+                    pairError = "Dieser Pi gehört schon zu einem Handy (Repair in den Einstellungen oder „sudo bambu repair“ auf dem Pi)."
+                    return
+                }
+                last = error
+                try? await Task.sleep(nanoseconds: UInt64(attempt) * 1_500_000_000)
+            }
         }
         if let e = last as? APIError, case .httpError(403, _) = e {
             pairError = "Dieser Pi gehört schon zu einem Handy (Repair in den Einstellungen oder „sudo bambu repair“ auf dem Pi)."
@@ -209,9 +232,9 @@ struct SetupFlowView: View {
                     } label: {
                         Text("Nach Drucker suchen").frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.borderedProminent).tint(.primary)
+                    .buttonStyle(PrimaryButtonStyle())
                 }
-                if scanning { HStack { Spacer(); ProgressView("Pi sucht … (ca. 10 s)"); Spacer() }.padding() }
+                if scanning { HStack { Spacer(); ProgressView("Pi sucht im Heimnetz … (bis zu 20 s)"); Spacer() }.padding() }
                 ForEach(candidates) { c in
                     Button {
                         chosenIP = c.ip; manualIP = ""
@@ -246,7 +269,9 @@ struct SetupFlowView: View {
             let res = try await APIService.shared.scanPrinters()
             candidates = res.candidates
             if res.candidates.count == 1 { chosenIP = res.candidates[0].ip }
-            if res.candidates.isEmpty { scanError = "Niemand antwortet. Drucker an? Gleiches WLAN? LAN-Modus an (Schritt zurück)?" }
+            if res.candidates.isEmpty {
+                scanError = "Kein Drucker im Netz \(res.prefix) gefunden. Drucker an? Gleiches WLAN? LAN-/Entwicklermodus an (Schritt zurück)? Du kannst die IP auch von Hand eingeben."
+            }
         } catch {
             scanError = "Suche fehlgeschlagen: \(error.localizedDescription)"
         }

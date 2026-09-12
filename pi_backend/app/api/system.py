@@ -1,7 +1,9 @@
 """System API routes."""
 import ipaddress
 import json
+import os
 import shutil
+import socket
 import subprocess
 from pathlib import Path
 from fastapi import APIRouter, HTTPException
@@ -10,7 +12,7 @@ import psutil
 import platform
 from loguru import logger
 
-from app.core.config import settings
+from app.core.config import settings, persisted_printer_file
 from app.core import state as app_state
 
 router = APIRouter()
@@ -68,39 +70,63 @@ async def set_printer_config(request: PrinterConfigRequest):
     settings.printer_serial = request.printer_serial.strip()
     settings.printer_access_code = request.printer_access_code
 
-    # Persist atomically so a restart keeps the phone-provided values
-    env = _env_file()
+    # Dauerhaft im Volume speichern — die .env im Container würde bei jedem
+    # Neubau verworfen. Beim Start lädt config.py diese Datei.
     try:
-        lines: dict[str, str] = {}
-        order: list[str] = []
-        if env.exists():
-            for line in env.read_text(encoding="utf-8").splitlines():
-                if "=" in line and not line.lstrip().startswith("#"):
-                    k, v = line.split("=", 1)
-                    lines[k.strip()] = v
-                    order.append(k.strip())
-        lines["PRINTER_HOST"] = host
-        lines["PRINTER_SERIAL"] = settings.printer_serial
-        lines["PRINTER_ACCESS_CODE"] = settings.printer_access_code
-        for k in ("PRINTER_HOST", "PRINTER_SERIAL", "PRINTER_ACCESS_CODE"):
-            if k not in order:
-                order.append(k)
-        env.write_text("".join(f"{k}={lines[k]}\n" for k in order), encoding="utf-8")
+        path = persisted_printer_file()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({
+            "printer_host": settings.printer_host,
+            "printer_serial": settings.printer_serial,
+            "printer_access_code": settings.printer_access_code,
+        }), encoding="utf-8")
         try:
-            import os
-            os.chmod(env, 0o600)
+            os.chmod(path, 0o600)
         except Exception:
             pass
     except Exception as e:
         logger.error(f"Failed to persist printer config: {e}")
         raise HTTPException(status_code=500, detail="Konnte Konfiguration nicht speichern")
 
-    connected = await app_state.reconnect_printer()
+    # Erst prüfen, ob der Drucker überhaupt erreichbar ist (Port 8883),
+    # dann MQTT verbinden — mit ein paar Versuchen (WLAN braucht manchmal kurz).
+    reachable = await _printer_port_open(host, settings.printer_port)
+    connected = False
+    for attempt in range(3):
+        connected = await app_state.reconnect_printer()
+        if connected:
+            break
+        import asyncio as _aio
+        await _aio.sleep(1.5 * (attempt + 1))
+
     if connected:
         return PrinterConfigResult(success=True, printer_connected=True,
                                    message="Drucker verbunden! 🎉")
-    return PrinterConfigResult(success=True, printer_connected=False,
-                               message="Gespeichert, aber Drucker antwortet nicht. Gleiches WLAN? Drucker an? LAN-Modus an?")
+    if not reachable:
+        return PrinterConfigResult(
+            success=True, printer_connected=False,
+            message=f"Drucker unter {host} nicht erreichbar (Port {settings.printer_port}). "
+                    "Gleiches WLAN? Drucker an? LAN-Modus am Drucker an? IP prüfen.")
+    return PrinterConfigResult(
+        success=True, printer_connected=False,
+        message="Drucker ist erreichbar, lehnt aber die Verbindung ab. "
+                "Access Code (8 Zeichen) und Seriennummer prüfen — LAN-/Entwicklermodus am Drucker an?")
+
+
+async def _printer_port_open(host: str, port: int, timeout: float = 3.0) -> bool:
+    """TCP-Test: ist der Drucker-MQTT-Port offen? (kein TLS-Handshake nötig)"""
+    import asyncio as _aio
+    try:
+        conn = _aio.open_connection(host, port)
+        _reader, writer = await _aio.wait_for(conn, timeout=timeout)
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except Exception:
+            pass
+        return True
+    except Exception:
+        return False
 
 
 # ------------------------------------------------------- remote access (Tailscale) ---
@@ -235,22 +261,56 @@ def _local_prefix() -> str:
         return "192.168.1"
 
 
-@router.post("/printer-scan")
-async def printer_scan():
-    """Pi sucht den A1 selbst im Heimnetz (Port 8883 anpingen).
+def _is_scan_net(ip: str) -> bool:
+    """Nur echte Heimnetz-Interfaces scannen (kein Docker/Tailscale/Loopback)."""
+    try:
+        a = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    if a.is_loopback or a.is_link_local or not a.is_private:
+        return False
+    # 100.64.0.0/10 = Tailscale/CGNAT, 172.17+/16 = Docker-Bridges
+    if str(a).startswith("100.") or ip.startswith("172.17.") or ip.startswith("172.18."):
+        return False
+    return True
 
-    Zuverlässig begrenzt: genau ein /24, 128 parallel, 1 s Timeout.
-    Ergebnis: Kandidaten mit IP — Auswahl per Tap, kein Abtippen.
+
+def _local_prefixes() -> list[str]:
+    """Alle /24-Präfixe der Heimnetz-Interfaces (host network) + Drucker-IP."""
+    prefixes: set[str] = set()
+    for name, addrs in psutil.net_if_addrs().items():
+        lname = name.lower()
+        if lname.startswith(("lo", "docker", "br-", "veth", "tailscale", "tun", "wg")):
+            continue
+        for addr in addrs:
+            if addr.family == socket.AF_INET and _is_scan_net(addr.address):
+                prefixes.add(".".join(addr.address.split(".")[:3]))
+    # Bereits konfigurierten Drucker direkt mitnehmen
+    if settings.printer_host and _is_scan_net(settings.printer_host):
+        prefixes.add(".".join(settings.printer_host.split(".")[:3]))
+    if not prefixes:
+        prefixes.add(_local_prefix())
+    return sorted(prefixes)
+
+
+@router.post("/printer-scan")
+async def printer_scan(deep: bool = True):
+    """Pi sucht den A1 selbst im Heimnetz (Port 8883).
+
+    Der Pi läuft im Host-Netz und scannt daher das echte Heimnetz. Es werden
+    ALLE eigenen /24-Präfixe abgeklopft (LAN/WLAN), mit großzügigem Timeout
+    und zwei Durchgängen — WLAN braucht oft etwas länger.
     """
     import asyncio as _aio
-    prefix = _local_prefix()
+    prefixes = _local_prefixes()
+    timeout = 2.5 if deep else 1.0
+    rounds = 2 if deep else 1
 
-    async def probe(i: int) -> dict | None:
-        ip = f"{prefix}.{i}"
+    async def probe(ip: str) -> dict | None:
         t0 = _aio.get_running_loop().time()
         try:
             conn = _aio.open_connection(ip, 8883)
-            reader, writer = await _aio.wait_for(conn, timeout=1.0)
+            _reader, writer = await _aio.wait_for(conn, timeout=timeout)
             writer.close()
             try:
                 await writer.wait_closed()
@@ -262,11 +322,19 @@ async def printer_scan():
             return None
 
     sem = _aio.Semaphore(128)
+    found: dict[str, dict] = {}
 
-    async def guarded(i: int) -> dict | None:
+    async def guarded(ip: str) -> None:
         async with sem:
-            return await probe(i)
+            r = await probe(ip)
+            if r and r["ip"] not in found:
+                found[r["ip"]] = r
 
-    found = [r for r in await _aio.gather(*[guarded(i) for i in range(1, 255)]) if r]
-    found.sort(key=lambda r: r["ms"])
-    return {"prefix": f"{prefix}.0/24", "candidates": found}
+    for _round in range(rounds):
+        targets = [f"{p}.{i}" for p in prefixes for i in range(1, 255)]
+        await _aio.gather(*[guarded(ip) for ip in targets])
+        if found:
+            break
+
+    results = sorted(found.values(), key=lambda r: r["ms"])
+    return {"prefix": ", ".join(f"{p}.0/24" for p in prefixes), "prefixes": prefixes, "candidates": results}

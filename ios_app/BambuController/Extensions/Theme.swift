@@ -40,19 +40,30 @@ extension View {
     func card() -> some View { modifier(Card()) }
 }
 
-/// Primary filled button — monochrome adaptive (black in light, white in dark),
-/// like premium companion apps. Accent green stays reserved for status/success.
-/// Pass `color` only for semantic cases (e.g. destructive red).
+/// Primary filled button — explicit adaptive colors so it stays readable on
+/// every iOS version/appearance. Disabled state gets its own clear colors
+/// (earlier versions rendered a white-on-white button under iOS 26).
 struct PrimaryButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
     var color: Color? = nil
     func makeBody(configuration: Configuration) -> some View {
-        let bg = color ?? Color.primary
-        let fg: Color = color == nil ? Color(.systemBackground) : .white
-        configuration.label
+        let bg: Color
+        let fg: Color
+        if let color {
+            bg = color
+            fg = .white
+        } else if isEnabled {
+            bg = Color.primary
+            fg = Color(.systemBackground)
+        } else {
+            bg = Color(.systemGray5)
+            fg = .secondary
+        }
+        return configuration.label
             .font(.headline)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 14)
-            .background(bg.opacity(configuration.isPressed ? 0.7 : 1))
+            .background(bg.opacity(configuration.isPressed ? 0.75 : 1))
             .foregroundColor(fg)
             .cornerRadius(AppTheme.controlRadius)
     }

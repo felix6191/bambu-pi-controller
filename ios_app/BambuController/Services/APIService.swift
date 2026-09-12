@@ -111,9 +111,21 @@ class APIService: ObservableObject {
         return try JSONDecoder().decode(PairingClaim.self, from: data)
     }
 
-    // Pi sucht den Drucker im Heimnetz (nach Pairing, mit Token)
+    // Pi sucht den Drucker im Heimnetz (nach Pairing, mit Token).
+    // Eigener, längerer Timeout: Der Scan klopft das ganze /24 ab.
     func scanPrinters() async throws -> PrinterScanResult {
-        try await request("/system/printer-scan", method: "POST", PrinterScanResult.self)
+        guard !baseURL.isEmpty, let url = URL(string: "\(baseURL)/api/v1/system/printer-scan") else { throw APIError.invalidURL }
+        var req = URLRequest(url: url, timeoutInterval: 45)
+        req.httpMethod = "POST"
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let (data, resp): (Data, URLResponse)
+        do { (data, resp) = try await session.data(for: req) }
+        catch let e as URLError where e.code == .timedOut { throw APIError.timeout }
+        catch { throw APIError.network(error) }
+        guard let http = resp as? HTTPURLResponse else { throw APIError.invalidResponse }
+        if http.statusCode == 401 { throw APIError.unauthorized }
+        guard 200...299 ~= http.statusCode else { throw APIError.httpError(http.statusCode, data) }
+        return try JSONDecoder().decode(PrinterScanResult.self, from: data)
     }
 
     // Fernzugriff (Tailscale) — Login läuft später aus der App
