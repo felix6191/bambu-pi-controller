@@ -227,7 +227,13 @@ async def remote_access_status():
 
 @router.post("/remote-access", response_model=RemoteAccessResult)
 async def remote_access_start():
-    """Fernzugriff aus der App starten: `tailscale up` im Hintergrund, Login-Link liefern."""
+    """Remote aus der App starten: Tailscale-Login anstoßen, Login-Link liefern.
+
+    Robust: `tailscale up` kann im Container scheitern (Rechte am Daemon-Socket,
+    Flag-Mismatch). Das ist KEIN Grund abzubrechen — der AuthURL steht auch im
+    `status --json` (BackendState=NeedsLogin). Wir versuchen `up`, ignorieren
+    dessen Rückgabewert und lesen den Link danach direkt aus dem Status.
+    """
     import asyncio as _aio
     binary = _ts_bin()
     if binary is None:
@@ -236,29 +242,19 @@ async def remote_access_start():
     if not os.path.exists(TS_SOCK):
         return RemoteAccessResult(installed=True, state="unavailable",
             message="Tailscale-Dienst läuft nicht. Auf dem Pi: sudo bambu tailscale")
+
+    # Login anstoßen — Fehler NICHT hart behandeln. Der eigentliche
+    # Verbindungsstatus + AuthURL kommt unten aus `status --json`.
     try:
         proc = subprocess.Popen([binary, "up", "--hostname", TS_HOSTNAME, "--accept-routes"],
-                                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            await _aio.get_running_loop().run_in_executor(None, proc.wait, 2.0)
+        except Exception:
+            pass  # läuft noch — normal
     except Exception as e:
-        logger.error(f"tailscale up failed: {e}")
-        return RemoteAccessResult(installed=True, state="error", message=f"Start fehlgeschlagen: {e}")
-    # Falls `up` sofort stirbt (z. B. keine Rechte, Daemon weg), Fehler
-    # direkt melden statt 15 s ins Leere zu pollen.
-    try:
-        rc = await _aio.get_running_loop().run_in_executor(None, proc.wait, 3.0)
-        if rc is not None and rc != 0:
-            err = ""
-            try:
-                _, err_out = proc.communicate(timeout=2)
-                err = (err_out or "").strip()
-            except Exception:
-                pass
-            logger.error(f"tailscale up exited rc={rc}: {err[:300]}")
-            return RemoteAccessResult(installed=True, state="error",
-                message=f"Tailscale-Start abgelehnt ({err[:150] or 'siehe sudo bambu logs'}). Auf dem Pi: sudo bambu tailscale")
-    except Exception:
-        pass  # läuft noch — normal, Login wartet auf den Browser
-    # Kurz warten, bis Login-Link oder Verbindung bereitsteht
+        logger.warning(f"tailscale up spawn failed (non-fatal): {e}")
+
     for _ in range(15):
         data, problem = await _ts_diagnose()
         if data is not None:

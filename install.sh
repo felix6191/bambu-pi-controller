@@ -122,15 +122,19 @@ install_tailscale() {
         : > /usr/bin/tailscale && chmod 644 /usr/bin/tailscale
     fi
     # Socket für den Container zugänglich machen, damit die App den Login
-    # starten kann. (Sonst käme der Container nicht an den Daemon.)
+    # starten kann. (Sonst käme der Container nicht an den Daemon.) Der
+    # Daemon legt den Socket gern als 0600 root an — ohne chmod lehnt der
+    # Container-Benutzer jeden `tailscale up`/`status` ab ("abgelehnt").
+    # Doppelt absichern: systemd-Drop-in (überlebt Neustarts) + sofortiges chmod.
     mkdir -p /etc/systemd/system/tailscaled.service.d
     cat > /etc/systemd/system/tailscaled.service.d/bambu-socket.conf <<'EOF'
 [Service]
-ExecStartPost=/bin/sh -c 'chmod 777 /var/run/tailscale/tailscaled.sock 2>/dev/null || true'
+ExecStartPost=/bin/sh -c 'chmod 777 /var/run/tailscale/tailscaled.sock /run/tailscale/tailscaled.sock 2>/dev/null || true'
 EOF
     systemctl daemon-reload 2>/dev/null || true
     systemctl restart tailscaled 2>/dev/null || true
-    ok "Tailscale bereit (Login in der App unter Einstellungen → Fernzugriff)"
+    chmod 777 /var/run/tailscale/tailscaled.sock /run/tailscale/tailscaled.sock 2>/dev/null || true
+    ok "Tailscale bereit (Login in der App unter Einstellungen → Verbindung → Remote)"
 }
 
 update_repo() {
