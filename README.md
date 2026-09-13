@@ -1,6 +1,6 @@
 # Bambu Pi Controller
 
-Dein Bambu Lab A1 — vom iPhone aus überwachen und steuern, von überall. Der Raspberry Pi ist die Brücke, Tailscale der sichere Tunnel. Keine Vorkenntnisse nötig.
+Dein Bambu Lab A1 — vom iPhone aus überwachen und steuern, von überall. Der Raspberry Pi ist die Brücke, ein Cloudflare Quick Tunnel der sichere Zugang von unterwegs. Keine Vorkenntnisse nötig.
 
 > ## ⚡ Ein Befehl — installieren oder aktualisieren
 > Standard **Raspberry Pi OS (64-bit)** per offiziellem **Raspberry Pi Imager** flashen, Pi starten, Terminal öffnen, einfügen, Enter.
@@ -29,7 +29,7 @@ curl -fsSL https://raw.githubusercontent.com/felix6191/bambu-pi-controller/main/
 
 Der Installer prüft alles selbst (System, Docker, Auto-Discovery per mDNS) und installiert den OrcaSlicer mit (STL→G-code auf dem Pi, kein separater Download). **Der Installer fragt keinerlei Druckerdaten ab und verlangt keinen Login** — der Pi startet einfach. Alles Weitere (Drucker finden, verbinden, STL slicen, Fernzugriff) passiert in der iPhone-App. Optional zeigt er die 2 Werte (Server-URL + Token) für den Notfall; gespeichert in `IPHONE_SETUP.txt`, jederzeit via `sudo bambu iphone`.
 
-**Schritt 3 · iPhone:** App öffnen → Einrichtung folgen (oder Demo-Modus zum Ausprobieren) → der Pi **erscheint von allein** → antippen → **„Verbinden"** (nichts abtippen, Token kommt per Pairing automatisch) → der Pi sucht den Drucker im WLAN → IP/Code bestätigen → ✅ fertig. Fernzugriff von unterwegs aktivierst du später in der App unter **Einstellungen → Fernzugriff (Tailscale)**.
+**Schritt 3 · iPhone:** App öffnen → Einrichtung folgen (oder Demo-Modus zum Ausprobieren) → der Pi **erscheint von allein** → antippen → **„Verbinden"** (nichts abtippen, Token kommt per Pairing automatisch) → der Pi sucht den Drucker im WLAN → IP/Code bestätigen → ✅ fertig. Fernzugriff von unterwegs aktivierst du später in der App unter **Einstellungen → Fernzugriff (Cloudflare)**.
 
 **Später auf dem Pi (alles mit einem Wort):**
 | Befehl | Was passiert |
@@ -39,7 +39,7 @@ Der Installer prüft alles selbst (System, Docker, Auto-Discovery per mDNS) und 
 | `sudo bambu logs` | Live-Protokoll |
 | `sudo bambu update` | Aktualisieren (lädt neue Dateien, baut nur Geändertes neu — kein unnötiger Orca-Download) |
 | `sudo bambu reconfigure` | Zugangs-Token neu erzeugen |
-| `sudo bambu tailscale` | Fernzugriff per Tailscale-Login aktivieren |
+| `sudo bambu tunnel` | Fernzugriff (Cloudflare Quick Tunnel, kein Login) starten |
 
 ---
 
@@ -52,7 +52,7 @@ Der Installer prüft alles selbst (System, Docker, Auto-Discovery per mDNS) und 
 └─────────────┘                     └──────┬───────┘
                                             │
                               ┌─────────────┴─────────────┐
-                              │       Tailscale VPN        │
+                              │  Cloudflare Quick Tunnel   │
                               └─────────────┬─────────────┘
                                             │
                               ┌─────────────▼─────────────┐
@@ -68,8 +68,8 @@ Der Installer prüft alles selbst (System, Docker, Auto-Discovery per mDNS) und 
 - **Temperaturregelung**: Düse, Bett, Kammer
 - **Speed & Flow**: Druckgeschwindigkeit und Flow-Rate anpassen
 - **Kamera**: MJPEG-Stream & Snapshots vom A1
-- **Remote-Zugriff**: Weltweit über Tailscale (keine Port-Forwarding nötig)
-- **Sicherheit**: Token-basierte Auth, lokaler MQTT, verschlüsseltes VPN
+- **Remote-Zugriff**: Weltweit über einen Cloudflare Quick Tunnel (kein Konto/Login, kein Port-Forwarding nötig)
+- **Sicherheit**: Token-basierte Auth, lokaler MQTT, HTTPS-Tunnel
 
 ## Voraussetzungen
 
@@ -87,7 +87,7 @@ Der Installer prüft alles selbst (System, Docker, Auto-Discovery per mDNS) und 
 ### iPhone
 - iOS 17+
 - BambuController App (kommt in den App Store)
-- Tailscale App installiert (nur für Fernzugriff von unterwegs)
+- Für den Fernzugriff ist **keine Zusatz-App und kein Cloudflare-Konto** nötig
 
 ## Manuelle Installation (falls gewünscht)
 
@@ -104,12 +104,10 @@ cp .env.example .env
 # .env bearbeiten mit deinen Drucker-Daten
 ```
 
-### 3. Tailscale einrichten (optional, erst für Fernzugriff)
-```bash
-# Installation passiert schon durch install.sh; Login bei Bedarf:
-sudo bambu tailscale
-# Oder aus der App: Einstellungen → Verbindung → Remote antippen
-```
+### 3. Fernzugriff einrichten (optional, erst bei Bedarf)
+`cloudflared` ist bereits im Docker-Image enthalten — **kein Cloudflare-Konto,
+kein Login und keine zusätzliche Installation** nötig. Den Tunnel bei Bedarf in
+der App unter **Einstellungen → Fernzugriff** starten (oder `sudo bambu tunnel`).
 
 ### 4. Docker Compose starten
 ```bash
@@ -122,8 +120,8 @@ App aus dem App Store laden (der Quellcode der App ist nicht Teil dieses Repos).
 
 ### 6. App konfigurieren
 Normalfall: nichts tippen — App öffnen, Pi antippen, „Verbinden".
-Nur als Fallback (z. B. Tailscale von unterwegs) in der App unter **Einstellungen**:
-- **Server URL**: `http://<tailscale-ip-des-pi>:8000`
+Nur als Fallback (z. B. Fernzugriff von unterwegs) in der App unter **Einstellungen**:
+- **Server URL**: die aktuelle Tunnel-URL `https://<zufall>.trycloudflare.com` (die App holt sie automatisch; am Pi: `sudo bambu tunnel status`)
 - **API Token**: Der gleiche wie in `.env` auf dem Pi (`sudo bambu iphone` zeigt ihn)
 - **Auto-Verbinden**: AN
 - **Verbindung testen** tippen
@@ -144,7 +142,7 @@ bambu-pi-controller/
 ├── pi_helpers/
 │   ├── bambu                  # Helfer: sudo bambu {status|iphone|logs|update|…}
 │   └── bambu-pi-avahi.service # mDNS-Anzeige _bambu-pi._tcp (richtet install.sh ein)
-├── docker-compose.yml         # Pi + Tailscale
+├── docker-compose.yml         # Pi-Container (inkl. Cloudflare-Tunnel)
 ├── install.sh                 # One-Click Installer (einziger Installationsweg)
 ├── deploy.sh                  # Deploy helper
 └── README.md
@@ -176,7 +174,7 @@ bambu-pi-controller/
 | `/api/v1/files/jobs/{id}/slice` | POST | Slicen starten (filament, quality, supports, infill) |
 | `/api/v1/files/jobs/{id}/print` | POST | Per FTP auf Drucker-SD laden + Druck starten |
 | `/api/v1/files/profiles` | GET | Verfügbare Filamente, Qualitäten, Slicer |
-| `/api/v1/system/remote-access` | GET/POST | Fernzugriff-Status / Tailscale-Login aus der App starten |
+| `/api/v1/system/remote-access` | GET/POST/DELETE | Fernzugriff-Status / Cloudflare-Tunnel starten / stoppen |
 
 Alle Endpoints (außer `/health`) benötigen `Authorization: Bearer <API_TOKEN>`.
 
@@ -221,10 +219,11 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 - Dasselbe Handy darf sich immer erneut verbinden; nur ein anderes Handy bekommt „gehört schon zu einem Handy". Manuell freigeben: `sudo bambu repair`.
 
 ### Kein Remote-Zugriff
-- In der App: **Einstellungen → Verbindung → Remote** antippen (öffnet einmalig die Tailscale-Anmeldung). Danach zwischen **Lokal** und **Remote** wechseln.
-- Wichtig: Die **Tailscale-App muss auch auf dem iPhone** installiert und mit demselben Konto angemeldet sein — sonst ist die 100.x-Adresse nicht erreichbar.
-- Alternativ am Pi: `sudo bambu tailscale`
-- Diagnose auf dem Pi: `sudo bambu logs` (der Server meldet genau, ob Tailscale fehlt, der Dienst steht oder nur der Login fehlt).
+- In der App: **Einstellungen → Fernzugriff** antippen. Der Pi startet dann einen **Cloudflare Quick Tunnel** — **kein Konto, kein Login und keine Zusatz-App auf dem iPhone** nötig.
+- Die angezeigte URL ist **ephemer**: Sie ändert sich bei jedem Start des Tunnels. Die App holt die aktuelle URL automatisch über die API.
+- Der öffentliche Endpunkt wird durch den **API-Token (Bearer-Auth)** geschützt — Token trotzdem nicht weitergeben.
+- Alternativ am Pi: `sudo bambu tunnel` (starten), `sudo bambu tunnel status` (Status), `sudo bambu tunnel stop` (stoppen).
+- Diagnose auf dem Pi: `sudo bambu logs` (der Server meldet, ob cloudflared fehlt, gerade startet oder eine klare Fehlermeldung liefert).
 
 ### Pairing schlägt fehl (Fehler 500)
 - Früher verursachten falsche Rechte am Docker-Volume `/data` den 500er — ist behoben.
@@ -243,7 +242,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ## Sicherheit
 
 - **API Token**: Zufälligen 32-Byte Token generieren (`openssl rand -hex 32`)
-- **Tailscale**: End-to-End verschlüsselt, kein Port-Forwarding nötig
+- **Cloudflare Quick Tunnel**: Öffentlicher HTTPS-Zugang ohne Konto/Login, kein Port-Forwarding; der API-Token schützt alle Endpunkte
 - **MQTT**: Nur im lokalen LAN, keine Internet-Exposition
 
 ## Lizenz

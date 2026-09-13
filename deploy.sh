@@ -19,10 +19,10 @@ echo ""; echo "📋 Status:"; docker compose ps
 
 echo ""; echo "🔗 Zugriff:"
 echo "   Lokal:      http://$(hostname -I | awk '{print $1}'):8000"
-command -v tailscale &>/dev/null && echo "   Tailscale:  http://$(tailscale ip -4 2>/dev/null):8000"
+echo "   Remote:     App → Einstellungen → Fernzugriff starten (Cloudflare, ohne Login)"
 echo ""
 echo "📱 iOS App Einstellungen:"
-echo "   Server URL: http://<TAILSCALE_IP>:8000"
+echo "   Server URL: http://$(hostname -I | awk '{print $1}'):8000  (Heimnetz)"
 echo "   API Token:  $(grep API_TOKEN pi_backend/.env | cut -d= -f2)"
 echo ""
 echo "📝 Logs: docker compose logs -f bambu-controller"
