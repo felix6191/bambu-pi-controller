@@ -246,6 +246,21 @@ setup_mdns() {
 
 # ---------------------------------------------------------------- deploy ---
 
+clean_old() {
+    # Alles Alte vom Programm entfernen, damit keine Altlasten Fehler machen
+    # und der Speicher nicht vollläuft (der Slicer-Container ist groß).
+    # Wichtig: KEIN `down -v` / `volume prune` — sonst gehen Druckerdaten,
+    # Token und Uploads im /data-Volume verloren.
+    log "Räume alte Container, Images und Build-Cache auf …"
+    ( cd "$INSTALL_DIR" && sudo -u "$SERVICE_USER" docker compose down \
+        --remove-orphans --rmi local ) >/dev/null 2>&1 || true
+    # Verwaiste Container/Netzwerke früherer Versionen (z. B. tailscale-Service)
+    sudo -u "$SERVICE_USER" docker container prune -f >/dev/null 2>&1 || true
+    # Alte, nicht mehr benutzte Images + Build-Cache freigeben
+    sudo -u "$SERVICE_USER" docker image prune -f >/dev/null 2>&1 || true
+    sudo -u "$SERVICE_USER" docker builder prune -f >/dev/null 2>&1 || true
+}
+
 fix_data_perms() {
     # Bestehende Installationen: das Volume /data wurde früher als root
     # angelegt, wodurch die App pairing.json nicht schreiben konnte (HTTP 500).
@@ -260,6 +275,7 @@ deploy() {
     title "Schritt 5/5 · Server starten"
     log "Baue und starte (erster Start lädt Docker-Bilder inkl. Slicer, dauert ein paar Minuten) …"
     cd "$INSTALL_DIR"
+    clean_old
     sudo -u "$SERVICE_USER" docker compose build || err "Build fehlgeschlagen. Details: sudo bambu logs"
     fix_data_perms
     sudo -u "$SERVICE_USER" docker compose up -d || err "Start fehlgeschlagen. Details: sudo bambu logs"
@@ -359,6 +375,7 @@ main() {
         fi
         setup_mdns
         cd "$INSTALL_DIR"
+        clean_old
         sudo -u "$SERVICE_USER" docker compose build
         fix_data_perms
         sudo -u "$SERVICE_USER" docker compose up -d
@@ -372,6 +389,7 @@ main() {
         wizard
         setup_mdns
         cd "$INSTALL_DIR"
+        clean_old
         sudo -u "$SERVICE_USER" docker compose build
         fix_data_perms
         sudo -u "$SERVICE_USER" docker compose up -d

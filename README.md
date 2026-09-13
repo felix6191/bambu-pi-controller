@@ -29,7 +29,7 @@ Der Installer prüft alles selbst (System, Docker, Auto-Discovery per mDNS) und 
 | `sudo bambu status` | Läuft alles? Adressen anzeigen |
 | `sudo bambu iphone` | Server-URL + Token erneut anzeigen |
 | `sudo bambu logs` | Live-Protokoll |
-| `sudo bambu update` | Aktualisieren |
+| `sudo bambu update` | Aktualisieren (lädt neue Dateien, räumt alte Container/Images/Build-Cache auf, baut neu) |
 | `sudo bambu reconfigure` | Zugangs-Token neu erzeugen |
 | `sudo bambu tailscale` | Fernzugriff per Tailscale-Login aktivieren |
 
