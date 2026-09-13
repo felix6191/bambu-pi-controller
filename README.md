@@ -231,6 +231,8 @@ cd ios_app
 
 ### App merkt sich alte Einrichtung
 - Solange das Tutorial **nicht komplett abgeschlossen** wurde, setzt die App ihre Einstellungen bei jedem frischen Start zurück (Pi wird wieder freigegeben und neu gesucht). Nach abgeschlossenem Setup bleiben die Einstellungen erhalten.
+- Bei jedem **Update/Neubau** wird am Pi das Verbindungsgerät zurückgesetzt — jedes Handy kann sich danach neu verbinden.
+- Dasselbe Handy darf sich immer erneut verbinden; nur ein anderes Handy bekommt „gehört schon zu einem Handy". Manuell freigeben: `sudo bambu repair`.
 
 ### Kein Remote-Zugriff
 - Erst in der App: **Einstellungen → Fernzugriff aktivieren** (öffnet die Tailscale-Anmeldung).

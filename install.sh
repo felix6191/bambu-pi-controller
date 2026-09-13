@@ -271,6 +271,35 @@ fix_data_perms() {
         -c 'chown -R appuser:appuser /data 2>/dev/null || true' ) >/dev/null 2>&1 || true
 }
 
+reset_pairing_state() {
+    # Bei jedem Build/Update das Verbindungsgerät zurücksetzen, damit sich
+    # wieder jedes (neue) Handy verbinden kann — sonst: "gehört schon zu einem
+    # Handy" (HTTP 403). Der API_Token bleibt gleich, ein bereits verbundenes
+    # Handy funktioniert also weiter.
+    local token
+    token=$(grep "^API_TOKEN=" "$ENV_FILE" 2>/dev/null | cut -d= -f2)
+    if [[ -n "$token" ]] && curl -sf -X POST -H "Authorization: Bearer $token" \
+        http://localhost:8000/api/v1/pairing/reset >/dev/null 2>&1; then
+        ok "Verbindungsgerät zurückgesetzt — jedes Handy kann sich neu verbinden."
+        return 0
+    fi
+    # Fallback ohne laufenden Server: Pairing-Datei im Volume entfernen.
+    ( cd "$INSTALL_DIR" && sudo -u "$SERVICE_USER" docker compose run --rm -T --no-deps \
+        --user root --entrypoint /bin/sh bambu-controller \
+        -c 'rm -f /data/pairing.json' ) >/dev/null 2>&1 || true
+    ok "Verbindungsgerät zurückgesetzt (Fallback)."
+}
+
+reset_pairing_when_ready() {
+    # Kurz auf den Server warten, dann Pairing zurücksetzen (Fallback greift
+    # trotzdem, auch wenn der Server noch nicht antwortet).
+    for _ in $(seq 1 20); do
+        curl -sf http://localhost:8000/health >/dev/null 2>&1 && break
+        sleep 2
+    done
+    reset_pairing_state
+}
+
 deploy() {
     title "Schritt 5/5 · Server starten"
     log "Baue und starte (erster Start lädt Docker-Bilder inkl. Slicer, dauert ein paar Minuten) …"
@@ -287,6 +316,7 @@ deploy() {
     done
     if [[ "$ok_health" -eq 1 ]]; then
         ok "Server läuft!"
+        reset_pairing_state
         local health
         health=$(curl -sf http://localhost:8000/health 2>/dev/null || echo "")
         echo "  $health" | grep -q '"printer_connected":true' \
@@ -379,6 +409,7 @@ main() {
         sudo -u "$SERVICE_USER" docker compose build
         fix_data_perms
         sudo -u "$SERVICE_USER" docker compose up -d
+        reset_pairing_when_ready
         ok "Aktualisiert ($(git -C "$INSTALL_DIR" rev-parse --short HEAD 2>/dev/null || echo '?'))."
         exit 0
     fi
@@ -393,6 +424,7 @@ main() {
         sudo -u "$SERVICE_USER" docker compose build
         fix_data_perms
         sudo -u "$SERVICE_USER" docker compose up -d
+        reset_pairing_when_ready
         ok "Neu konfiguriert und neu gestartet."
         print_summary
         exit 0

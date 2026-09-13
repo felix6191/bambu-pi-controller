@@ -128,15 +128,22 @@ async def pairing_status() -> dict:
 @router.post("/claim", response_model=ClaimResult)
 async def claim(request: ClaimRequest, http: Request) -> ClaimResult:
     """Ein Tap in der App verbindet: Token-Austausch, nichts abtippen."""
-    if is_paired():
+    name = re.sub(r"[^A-Za-z0-9 _.-]+", "", request.device_name).strip()[:64] or "iPhone"
+    existing = _read_pairing()
+    if existing.get("paired"):
+        stored = str(existing.get("device_name", "")).strip()
+        # Dasselbe Gerät darf sich jederzeit neu verbinden (z. B. App neu
+        # installiert) — nur ein ANDERES Handy bekommt 403.
+        if stored and stored == name:
+            logger.info(f"Re-paired same device '{name}'")
+            return ClaimResult(api_token=_ensure_token(), pi_id=pi_id())
         raise HTTPException(status_code=403, detail="Pi ist schon verbunden (Repair in der App oder 'sudo bambu repair')")
     ip = http.client.host if http.client else "?"
     if not _rate_ok(ip):
         raise HTTPException(status_code=429, detail="Zu viele Versuche — kurz warten")
-    name = re.sub(r"[^A-Za-z0-9 _.-]+", "", request.device_name).strip()[:64] or "iPhone"
     token = _ensure_token()
     _write_pairing({
-        **_read_pairing(),
+        **existing,
         "paired": True,
         "device_name": name,
         "paired_at": datetime.now(timezone.utc).isoformat(),
