@@ -13,7 +13,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # System-Python + Laufzeitbibliotheken für OrcaSlicer (headless).
 # Dieser Layer ändert sich praktisch nie -> bleibt beim Update gecacht.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        python3 python3-venv python3-pip curl ca-certificates \
+        python3 python3-venv python3-pip curl ca-certificates sudo \
         libgl1 libglib2.0-0 libnss3 libx11-6 libx11-xcb1 libxcb1 libxext6 \
         libxrender1 libxtst6 libxi6 libasound2t64 libfontconfig1 libdbus-1-3 \
         libsm6 libice6 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 \
@@ -64,6 +64,13 @@ ENV PATH="/opt/venv/bin:${PATH}"
 RUN useradd -m -s /bin/bash appuser \
     && mkdir -p /data /home/appuser/.config \
     && chown -R appuser:appuser /app /data /home/appuser
+# Tailscale-Fix: tailscaled akzeptiert Kontrollbefehle NUR als root (Peer-UID),
+# chmod am Socket allein reicht nicht. Also darf appuser genau das CLI als root
+# aufrufen — das CLI ist die Host-URI-Binärdatei, die wir in den Container
+# reinmounten (/usr/local/bin/tailscale).
+RUN echo 'appuser ALL=(root) NOPASSWD: /usr/local/bin/tailscale' \
+        > /etc/sudoers.d/bambu-tailscale \
+    && chmod 440 /etc/sudoers.d/bambu-tailscale
 USER appuser
 ENV HOME=/home/appuser
 

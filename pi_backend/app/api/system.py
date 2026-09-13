@@ -159,13 +159,25 @@ def _ts_bin() -> str | None:
     return shutil.which(TAILSCALE)
 
 
+def _ts_argv(binary: str, *args: str) -> list[str]:
+    """tailscale CLI aufrufen — im Container muss das als root via sudo.
+
+    Hintergrund: tailscaled akzeptiert Kontrollbefehle NUR von root bzw. dem
+    Operator-User — er prüft die Peer-UID an der Socket-Verbindung. chmod 777
+    am Socket allein hilft daher nicht (die Verbindung klappt, das Kommando
+    wird „abgelehnt"). Im Docker-Image darf appuser via sudoers genau dieses
+    eine Binary als root ausführen.
+    """
+    if os.geteuid() == 0:
+        return [binary, *args]
+    return ["sudo", "-n", binary, *args]
+
+
 def _ts_diagnose_sync() -> tuple[dict | None, str]:
     """`tailscale status --json` plus Fehlerursache.
 
     Returns (data, problem) mit problem in {"", "missing", "daemon_down",
-    "logged_out", "no_response"}. Der Container läuft als Nicht-root —
-    ohne lesbaren Daemon-Socket (Host-Mount) kommt nur Müll zurück;
-    das wird hier sauber unterschieden statt „unavailable".
+    "logged_out", "no_response"}.
     """
     binary = _ts_bin()
     if binary is None:
@@ -173,7 +185,8 @@ def _ts_diagnose_sync() -> tuple[dict | None, str]:
     if not os.path.exists(TS_SOCK):
         return None, "daemon_down"
     try:
-        proc = subprocess.run([binary, "status", "--json"], capture_output=True, text=True, timeout=6)
+        proc = subprocess.run(_ts_argv(binary, "status", "--json"),
+                              capture_output=True, text=True, timeout=6)
     except Exception as e:
         logger.warning(f"tailscale status failed: {e}")
         return None, "no_response"
@@ -246,7 +259,7 @@ async def remote_access_start():
     # Login anstoßen — Fehler NICHT hart behandeln. Der eigentliche
     # Verbindungsstatus + AuthURL kommt unten aus `status --json`.
     try:
-        proc = subprocess.Popen([binary, "up", "--hostname", TS_HOSTNAME, "--accept-routes"],
+        proc = subprocess.Popen(_ts_argv(binary, "up", "--hostname", TS_HOSTNAME, "--accept-routes"),
                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         try:
             await _aio.get_running_loop().run_in_executor(None, proc.wait, 2.0)
