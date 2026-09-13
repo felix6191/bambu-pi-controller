@@ -8,6 +8,7 @@ import re
 import shutil
 import socket
 import time
+from collections import deque
 from pathlib import Path
 
 import psutil
@@ -153,20 +154,30 @@ class RemoteAccessResult(BaseModel):
     message: str = ""
     auth_url: str = ""
     tailscale_ip: str | None = None
+    target: str = ""
+    binary: str = ""
+    detail: str = ""
 
 
 CLOUDFLARED = "cloudflared"
-CF_TARGET = "http://localhost:8000"
-CF_START_TIMEOUT = 35.0
+# Deterministisch IPv4-Loopback: `localhost` kann zuerst ::1 auflösen, während
+# Uvicorn nur auf IPv4 lauscht. Der Container läuft im Host-Netz, daher ist
+# 127.0.0.1:8000 immer der eigene API-Server.
+CF_TARGET = "http://127.0.0.1:8000"
+CF_URL_TIMEOUT = 30.0
+CF_READY_TIMEOUT = 15.0
 CF_CANDIDATES: tuple[str, ...] = ("/usr/local/bin/cloudflared", "/usr/bin/cloudflared")
 CF_URL_RE = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com")
+CF_CONNECTED_RE = re.compile(r"Registered tunnel connection", re.IGNORECASE)
 CF_MISSING_MSG = ("cloudflared fehlt auf dem Pi. Bitte das Backend aktualisieren: "
                   "sudo bambu update")
 
 _cf_proc: asyncio.subprocess.Process | None = None
 _cf_url = ""
+_cf_connected = False
 _cf_task: asyncio.Task[None] | None = None
 _cf_lock = asyncio.Lock()
+_cf_log: deque[str] = deque(maxlen=50)
 
 
 def _cf_bin() -> str | None:
@@ -187,13 +198,40 @@ def _extract_remote_url(text: str) -> str:
 
 
 def _cf_result(installed: bool, state: str, message: str = "",
-               remote_url: str = "") -> RemoteAccessResult:
+               remote_url: str = "", detail: str = "",
+               binary: str = "") -> RemoteAccessResult:
     return RemoteAccessResult(installed=installed, state=state,
-                              remote_url=remote_url, message=message)
+                              remote_url=remote_url, message=message,
+                              target=CF_TARGET if installed else "",
+                              binary=binary, detail=detail)
+
+
+def _cf_note(line: str) -> None:
+    """Eine cloudflared-Logzeile merken und daraus URL/Edge-Status ableiten."""
+    global _cf_url, _cf_connected
+    _cf_log.append(line)
+    url = _extract_remote_url(line)
+    if url and not _cf_url:
+        _cf_url = url
+        logger.info(f"cloudflared tunnel URL: {url}")
+    if not _cf_connected and CF_CONNECTED_RE.search(line):
+        _cf_connected = True
+        logger.info("cloudflared edge connection registered")
+
+
+def _cf_log_tail(limit: int = 5, max_len: int = 800) -> str:
+    return " | ".join(list(_cf_log)[-limit:])[:max_len]
+
+
+def _cf_error_summary(limit: int = 3, max_len: int = 600) -> str:
+    matches = [line for line in _cf_log
+               if re.search(r"ERR|error|failed|failure|unable|cannot|refused|timeout",
+                            line, re.IGNORECASE)]
+    interesting = matches[-limit:] or list(_cf_log)[-limit:]
+    return " | ".join(interesting)[:max_len]
 
 
 async def _cf_pump_stderr(proc: asyncio.subprocess.Process) -> None:
-    global _cf_url
     stream = proc.stderr
     if stream is None:
         return
@@ -205,10 +243,7 @@ async def _cf_pump_stderr(proc: asyncio.subprocess.Process) -> None:
         if not line:
             continue
         logger.info(f"cloudflared: {line}")
-        url = _extract_remote_url(line)
-        if url and not _cf_url:
-            _cf_url = url
-            logger.info(f"cloudflared tunnel URL: {url}")
+        _cf_note(line)
 
 
 async def _cf_drain(stream: asyncio.StreamReader | None) -> None:
@@ -222,7 +257,7 @@ async def _cf_drain(stream: asyncio.StreamReader | None) -> None:
 
 
 async def _cf_supervise(proc: asyncio.subprocess.Process) -> None:
-    global _cf_proc, _cf_url
+    global _cf_proc, _cf_url, _cf_connected
     try:
         await asyncio.gather(_cf_pump_stderr(proc), _cf_drain(proc.stdout))
         await proc.wait()
@@ -234,14 +269,17 @@ async def _cf_supervise(proc: asyncio.subprocess.Process) -> None:
         if _cf_proc is proc:
             _cf_proc = None
             _cf_url = ""
+            _cf_connected = False
+            _cf_log.append(f"cloudflared beendet (code={proc.returncode})")
             logger.info("cloudflared beendet")
 
 
 async def _cf_stop() -> None:
-    global _cf_proc, _cf_url, _cf_task
+    global _cf_proc, _cf_url, _cf_connected, _cf_task
     proc, task = _cf_proc, _cf_task
     _cf_proc = None
     _cf_url = ""
+    _cf_connected = False
     _cf_task = None
     if proc is not None and proc.returncode is None:
         try:
@@ -271,13 +309,22 @@ async def _cf_stop() -> None:
 @router.get("/remote-access", response_model=RemoteAccessResult)
 async def remote_access_status() -> RemoteAccessResult:
     """Aktueller Fernzugriff-Status (reines Lesen, keine Nebenwirkungen)."""
-    if _cf_bin() is None:
+    binary = _cf_bin()
+    if binary is None:
         return _cf_result(False, "unavailable", CF_MISSING_MSG)
     if _cf_proc is not None and _cf_proc.returncode is None:
+        if _cf_url and _cf_connected:
+            return _cf_result(True, "Running", "Fernzugriff aktiv.", _cf_url,
+                              binary=binary)
         if _cf_url:
-            return _cf_result(True, "Running", "Fernzugriff aktiv.", _cf_url)
-        return _cf_result(True, "starting", "Tunnel startet …")
-    return _cf_result(True, "stopped", "Fernzugriff gestoppt.")
+            return _cf_result(
+                True, "starting",
+                "Tunnel-URL erzeugt, Edge-Verbindung wird aufgebaut …",
+                _cf_url, _cf_log_tail(), binary)
+        return _cf_result(True, "starting", "Tunnel startet …",
+                          detail=_cf_log_tail(), binary=binary)
+    return _cf_result(True, "stopped", "Fernzugriff gestoppt.",
+                      detail=_cf_log_tail(), binary=binary)
 
 
 @router.post("/remote-access", response_model=RemoteAccessResult)
@@ -285,46 +332,76 @@ async def remote_access_start() -> RemoteAccessResult:
     """Cloudflare Quick Tunnel starten (kein Login, kein Konto).
 
     Läuft der Tunnel bereits, wird seine URL zurückgegeben. Sonst wird
-    cloudflared gestartet und bis zu ~35 s auf die öffentliche URL gewartet.
+    cloudflared gestartet und zuerst auf die öffentliche URL, danach auf die
+    tatsächlich registrierte Edge-Verbindung gewartet. Erst beides zusammen
+    bedeutet „Running".
     """
-    global _cf_proc, _cf_url, _cf_task
+    global _cf_proc, _cf_url, _cf_connected, _cf_task
     async with _cf_lock:
-        if _cf_proc is not None and _cf_proc.returncode is None and _cf_url:
-            return _cf_result(True, "Running", "Fernzugriff aktiv.", _cf_url)
         binary = _cf_bin()
         if binary is None:
             return _cf_result(False, "unavailable", CF_MISSING_MSG)
+        if (_cf_proc is not None and _cf_proc.returncode is None
+                and _cf_url and _cf_connected):
+            return _cf_result(True, "Running", "Fernzugriff aktiv.", _cf_url,
+                              binary=binary)
         await _cf_stop()
+        _cf_log.clear()
         try:
             proc = await asyncio.create_subprocess_exec(
                 binary, "tunnel", "--url", CF_TARGET, "--no-autoupdate",
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         except Exception as e:
-            return _cf_result(True, "error", f"cloudflared konnte nicht starten: {e}")
+            _cf_log.append(f"cloudflared start failed: {e}")
+            return _cf_result(True, "error",
+                              f"cloudflared konnte nicht starten: {e}",
+                              detail=_cf_log_tail(), binary=binary)
         _cf_proc = proc
         _cf_url = ""
+        _cf_connected = False
         _cf_task = asyncio.create_task(_cf_supervise(proc))
         loop = asyncio.get_running_loop()
-        deadline = loop.time() + CF_START_TIMEOUT
-        while loop.time() < deadline:
+        url_deadline = loop.time() + CF_URL_TIMEOUT
+        while loop.time() < url_deadline:
             if _cf_url:
-                return _cf_result(True, "Running", "Fernzugriff aktiv.", _cf_url)
+                break
             if proc.returncode is not None:
                 break
             await asyncio.sleep(0.25)
-        await _cf_stop()
-        return _cf_result(True, "error",
-                          "cloudflared liefert keine öffentliche URL. "
-                          "Bitte später erneut versuchen.")
+        if not _cf_url:
+            await _cf_stop()
+            detail = _cf_error_summary() or "keine cloudflared-Ausgabe"
+            return _cf_result(True, "error",
+                              "cloudflared liefert keine öffentliche URL. "
+                              "Bitte später erneut versuchen.",
+                              detail=detail, binary=binary)
+        ready_deadline = loop.time() + CF_READY_TIMEOUT
+        while loop.time() < ready_deadline:
+            if _cf_connected:
+                return _cf_result(True, "Running", "Fernzugriff aktiv.",
+                                  _cf_url, binary=binary)
+            if proc.returncode is not None:
+                break
+            await asyncio.sleep(0.5)
+        if proc.returncode is not None:
+            await _cf_stop()
+            return _cf_result(True, "error",
+                              "cloudflared wurde unerwartet beendet.",
+                              detail=_cf_error_summary(), binary=binary)
+        return _cf_result(
+            True, "starting",
+            "Tunnel-URL erzeugt, Edge-Verbindung wird aufgebaut …",
+            _cf_url, _cf_log_tail(), binary)
 
 
 @router.delete("/remote-access", response_model=RemoteAccessResult)
 async def remote_access_stop() -> RemoteAccessResult:
     """Cloudflare Quick Tunnel stoppen."""
     async with _cf_lock:
-        installed = _cf_bin() is not None
+        binary = _cf_bin()
         await _cf_stop()
-    return _cf_result(installed, "stopped", "Fernzugriff gestoppt.")
+    return _cf_result(binary is not None, "stopped", "Fernzugriff gestoppt.",
+                      detail=_cf_log_tail(), binary=binary or "")
 
 
 @router.get("/info")

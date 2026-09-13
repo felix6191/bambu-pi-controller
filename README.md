@@ -220,9 +220,11 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 ### Kein Remote-Zugriff
 - In der App: **Einstellungen → Fernzugriff** antippen. Der Pi startet dann einen **Cloudflare Quick Tunnel** — **kein Konto, kein Login und keine Zusatz-App auf dem iPhone** nötig.
+- Der Status ist erst **Running**, wenn nicht nur die Tunnel-URL erzeugt, sondern die Verbindung zur Cloudflare-Edge tatsächlich registriert ist. Vorher heißt der Status **starting**.
 - Die angezeigte URL ist **ephemer**: Sie ändert sich bei jedem Start des Tunnels. Die App holt die aktuelle URL automatisch über die API.
 - Der öffentliche Endpunkt wird durch den **API-Token (Bearer-Auth)** geschützt — Token trotzdem nicht weitergeben.
-- Alternativ am Pi: `sudo bambu tunnel` (starten), `sudo bambu tunnel status` (Status), `sudo bambu tunnel stop` (stoppen).
+- Alternativ am Pi: `sudo bambu tunnel` (starten), `sudo bambu tunnel status` (Status inkl. Ziel, Binary und Startdiagnose), `sudo bambu tunnel stop` (stoppen).
+- Falls `cloudflared fehlt` gemeldet wird: unbedingt `sudo bambu update` laufen lassen, damit das neue Docker-Image mit der Tunnel-Binärdatei gebaut wird.
 - Diagnose auf dem Pi: `sudo bambu logs` (der Server meldet, ob cloudflared fehlt, gerade startet oder eine klare Fehlermeldung liefert).
 
 ### Pairing schlägt fehl (Fehler 500)

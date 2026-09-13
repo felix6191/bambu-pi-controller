@@ -278,6 +278,17 @@ image_ready() {
     [[ -n "$img" ]] && sudo -u "$SERVICE_USER" docker image inspect "$img" >/dev/null 2>&1
 }
 
+image_has_cloudflared() {
+    # Der Fernzugriff braucht cloudflared IM Image. Falls ein alter Stand die
+    # aktuelle Commit-ID trägt, aber ohne Tunnel-Binärdatei gebaut wurde,
+    # erzwingt diese Prüfung trotzdem einen Neubau.
+    local img
+    img="$( cd "$INSTALL_DIR" && sudo -u "$SERVICE_USER" docker compose config --images 2>/dev/null | head -1 )"
+    [[ -n "$img" ]] || return 1
+    sudo -u "$SERVICE_USER" docker run --rm --entrypoint /bin/sh "$img" \
+        -c 'test -x /usr/local/bin/cloudflared' >/dev/null 2>&1
+}
+
 mark_built() {
     repo_head > "$BUILT_MARKER" 2>/dev/null || true
     chown "$SERVICE_USER:$SERVICE_USER" "$BUILT_MARKER" 2>/dev/null || true
@@ -398,7 +409,7 @@ main() {
         # Nur neu bauen, wenn sich der Commit wirklich geändert hat. Sonst
         # reicht ein (idempotentes) Starten. Docker-Layer-Cache bleibt erhalten,
         # dadurch wird nie unnötig der große Orca-Download wiederholt.
-        if built_is_current && image_ready; then
+        if built_is_current && image_ready && image_has_cloudflared; then
             log "Bereits auf dem neuesten Stand ($(git -C "$INSTALL_DIR" rev-parse --short HEAD)) — kein Neubau nötig."
             sudo -u "$SERVICE_USER" docker compose up -d
         else

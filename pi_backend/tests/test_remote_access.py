@@ -14,20 +14,23 @@ from app.api import system as system_mod
 def _install_fake_cloudflared(monkeypatch, tmp_path, mode: str = "ok") -> str:
     """Fake-cloudflared auf PATH legen. Gibt die erwartete URL zurück.
 
-    mode="ok"   -> URL auf stderr, Prozess bleibt am Leben.
-    mode="fail" -> sofortiger Abbruch ohne URL.
+    mode="ok"      -> URL plus registrierte Edge-Verbindung, bleibt am Leben.
+    mode="no-edge" -> URL ohne Edge-Registrierung, bleibt am Leben.
+    mode="fail"    -> sofortiger Abbruch ohne URL.
     """
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
     fake = bin_dir / "cloudflared"
-    if mode == "ok":
-        script = "\n".join([
+    if mode in ("ok", "no-edge"):
+        lines = [
             "#!/bin/bash",
             'echo "Your quick Tunnel has been created! '
             'Visit it at https://test-tunnel.trycloudflare.com" 1>&2',
-            "exec /bin/sleep 300",
-            "",
-        ])
+        ]
+        if mode == "ok":
+            lines.append('echo "INF Registered tunnel connection connIndex=0" 1>&2')
+        lines.extend(["exec /bin/sleep 300", ""])
+        script = "\n".join(lines)
     else:
         script = "\n".join([
             "#!/bin/bash",
@@ -45,11 +48,15 @@ def _install_fake_cloudflared(monkeypatch, tmp_path, mode: str = "ok") -> str:
 def _reset_state():
     system_mod._cf_proc = None
     system_mod._cf_url = ""
+    system_mod._cf_connected = False
     system_mod._cf_task = None
+    system_mod._cf_log.clear()
     yield
     system_mod._cf_proc = None
     system_mod._cf_url = ""
+    system_mod._cf_connected = False
     system_mod._cf_task = None
+    system_mod._cf_log.clear()
 
 
 @pytest.mark.asyncio
@@ -61,6 +68,9 @@ async def test_start_status_stop_lifecycle(monkeypatch, tmp_path):
     assert start.state == "Running"
     assert start.provider == "cloudflare"
     assert start.remote_url == url
+    assert start.target == system_mod.CF_TARGET
+    assert start.binary
+    assert system_mod._cf_connected is True
     proc = system_mod._cf_proc
     assert proc is not None
 
@@ -83,6 +93,23 @@ async def test_start_status_stop_lifecycle(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_url_without_edge_registration_stays_starting(monkeypatch, tmp_path):
+    url = _install_fake_cloudflared(monkeypatch, tmp_path, mode="no-edge")
+    monkeypatch.setattr(system_mod, "CF_URL_TIMEOUT", 2.0)
+    monkeypatch.setattr(system_mod, "CF_READY_TIMEOUT", 0.2)
+
+    start = await system_mod.remote_access_start()
+    try:
+        assert start.state == "starting"
+        assert start.remote_url == url
+        assert system_mod._cf_connected is False
+        assert system_mod._cf_proc is not None
+    finally:
+        await system_mod.remote_access_stop()
+    assert system_mod._cf_proc is None
+
+
+@pytest.mark.asyncio
 async def test_missing_binary(monkeypatch, tmp_path):
     monkeypatch.setenv("PATH", str(tmp_path))
     monkeypatch.setattr(system_mod, "CF_CANDIDATES", ())
@@ -99,6 +126,7 @@ async def test_failing_binary_returns_error(monkeypatch, tmp_path):
     assert result.installed is True
     assert result.state == "error"
     assert result.message
+    assert result.detail
     assert system_mod._cf_proc is None
 
 
@@ -124,7 +152,7 @@ def test_response_json_keys():
         installed=True, state="Running").model_dump_json())
     assert set(data.keys()) == {
         "installed", "state", "provider", "remote_url", "auth_url",
-        "tailscale_ip", "message",
+        "tailscale_ip", "message", "target", "binary", "detail",
     }
     assert data["provider"] == "cloudflare"
     assert data["remote_url"] == ""
