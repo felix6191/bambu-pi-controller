@@ -49,7 +49,9 @@ RUN set -eux; \
 
 # /data muss dem Container-User gehören — sonst kann er pairing.json/jobs
 # nicht schreiben und die App bekommt HTTP 500 (genau der Pairing-Fehler).
-RUN useradd -m -u 1000 appuser \
+# Keine feste UID 1000: Im Ubuntu-24.04-Image belegt der User "ubuntu" bereits
+# UID 1000, sonst bricht useradd mit "UID 1000 is not unique" ab.
+RUN useradd -m -s /bin/bash appuser \
     && mkdir -p /data /home/appuser/.config \
     && chown -R appuser:appuser /app /data /home/appuser
 USER appuser
