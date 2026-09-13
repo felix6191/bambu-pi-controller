@@ -466,9 +466,17 @@ struct WSPrintJob: Codable {
 // MARK: - App Settings
 
 struct AppSettings: Codable {
+    /// Aktive URL — alle API/WS-Leser nutzen diese (bleibt kompatibel).
     var serverURL: String = ""
     var apiToken: String = ""
-    var useTailscale: Bool = true
+    /// Explizites Remote-Opt-in: erst nach Tailscale-Login true.
+    /// (Der alte useTailscale-Toggle war wirkungslos und default-an —
+    /// das hat „Tailscale aktiviert" suggeriert, ohne dass je etwas getan wurde.)
+    var remoteEnabled: Bool = false
+    /// Gemerkte Adressen für Lokal und Remote (Fallback-Umschalter).
+    var localServerURL: String = ""
+    var remoteServerURL: String = ""
+    var useTailscale: Bool = false
     var autoConnect: Bool = true
     var onboarded: Bool = false
     var demoMode: Bool = false
@@ -477,6 +485,57 @@ struct AppSettings: Codable {
     // Favorite defaults from the playful onboarding sliders (prefill for new prints)
     var defaultNozzleTemp: Int = 210
     var defaultBedTemp: Int = 60
+
+    enum CodingKeys: String, CodingKey {
+        case serverURL, apiToken, remoteEnabled, localServerURL, remoteServerURL
+        case useTailscale, autoConnect, onboarded, demoMode, demoWanted
+        case defaultNozzleTemp, defaultBedTemp
+    }
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        serverURL = try c.decodeIfPresent(String.self, forKey: .serverURL) ?? ""
+        apiToken = try c.decodeIfPresent(String.self, forKey: .apiToken) ?? ""
+        remoteEnabled = try c.decodeIfPresent(Bool.self, forKey: .remoteEnabled) ?? false
+        localServerURL = try c.decodeIfPresent(String.self, forKey: .localServerURL) ?? ""
+        remoteServerURL = try c.decodeIfPresent(String.self, forKey: .remoteServerURL) ?? ""
+        useTailscale = try c.decodeIfPresent(Bool.self, forKey: .useTailscale) ?? false
+        autoConnect = try c.decodeIfPresent(Bool.self, forKey: .autoConnect) ?? true
+        onboarded = try c.decodeIfPresent(Bool.self, forKey: .onboarded) ?? false
+        demoMode = try c.decodeIfPresent(Bool.self, forKey: .demoMode) ?? false
+        demoWanted = try c.decodeIfPresent(Bool.self, forKey: .demoWanted) ?? true
+        defaultNozzleTemp = try c.decodeIfPresent(Int.self, forKey: .defaultNozzleTemp) ?? 210
+        defaultBedTemp = try c.decodeIfPresent(Int.self, forKey: .defaultBedTemp) ?? 60
+        // Migration: alte Stände kennen nur serverURL. 100.x-Adressen sind
+        // Tailscale (remote), alles andere ist Heimnetz (lokal).
+        if localServerURL.isEmpty && remoteServerURL.isEmpty && !serverURL.isEmpty {
+            if Self.isTailscaleURL(serverURL) {
+                remoteServerURL = serverURL
+                remoteEnabled = true
+            } else {
+                localServerURL = serverURL
+            }
+        }
+    }
+
+    /// 100.64.0.0/10 = Tailscale-Netz. Bewusst Oktette geprüft — ein bloßes
+    /// "100." im String würde 192.168.100.x (Heimnetz!) falsch einordnen.
+    static func isTailscaleURL(_ url: String) -> Bool {
+        let host: String
+        if let u = URL(string: url), let h = u.host {
+            host = h
+        } else {
+            host = url
+        }
+        let parts = host.split(separator: ".").compactMap { Int($0) }
+        guard parts.count == 4, parts[0] == 100 else { return false }
+        return (64...127).contains(parts[1])
+    }
+
+    /// Lokal verbunden = aktive URL ist keine Tailscale-Adresse.
+    var isUsingRemote: Bool { Self.isTailscaleURL(serverURL) }
 
     static var shared = AppSettings.load()
 
@@ -506,9 +565,17 @@ struct AppSettings: Codable {
     func save() { if let d = try? JSONEncoder().encode(self) { UserDefaults.standard.set(d, forKey: "AppSettings") } }
 
     /// Persist AND publish to the live singleton so API/WS pick up changes immediately.
+    /// Normalisiert nebenbei: die aktive URL landet auf der passenden
+    /// Seite (lokal vs. remote), damit der Umschalter sie wiederfindet.
     func commit() {
-        save()
-        Self.shared = self
+        var s = self
+        if Self.isTailscaleURL(s.serverURL) {
+            s.remoteServerURL = s.serverURL
+        } else if !s.serverURL.isEmpty {
+            s.localServerURL = s.serverURL
+        }
+        s.save()
+        Self.shared = s
     }
 
     var baseURL: String { serverURL.hasSuffix("/") ? String(serverURL.dropLast()) : serverURL }

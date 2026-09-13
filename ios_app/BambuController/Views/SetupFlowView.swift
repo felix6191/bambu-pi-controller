@@ -172,6 +172,7 @@ struct SetupFlowView: View {
             do {
                 let claim = try await APIService.shared.claimPi(baseURL: pi.baseURL)
                 settings.serverURL = pi.baseURL
+                settings.localServerURL = pi.baseURL
                 settings.apiToken = claim.apiToken
                 settings.demoWanted = false
                 settings.commit()

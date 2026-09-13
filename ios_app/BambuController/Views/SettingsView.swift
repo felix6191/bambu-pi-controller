@@ -63,14 +63,21 @@ struct SettingsView: View {
                             .accessibilityLabel(showToken ? "Token verbergen" : "Token anzeigen")
                     }
                     .onChange(of: settings.apiToken) { _, _ in commit() }
-                    Toggle("Tailscale unterwegs nutzen", isOn: $settings.useTailscale)
-                        .onChange(of: settings.useTailscale) { _, _ in commit() }
                     Toggle("Automatisch verbinden", isOn: $settings.autoConnect)
                         .onChange(of: settings.autoConnect) { _, _ in commit() }
+                    if !settings.localServerURL.isEmpty || !settings.remoteServerURL.isEmpty {
+                        HStack {
+                            Text("Aktiv")
+                            Spacer()
+                            Text(settings.isUsingRemote ? "Remote (Tailscale)" : "Lokal (Heimnetz)")
+                                .foregroundColor(.secondary)
+                        }
+                        .font(.footnote)
+                    }
                 } header: {
                     Text("Server (Raspberry Pi)")
                 } footer: {
-                    HintText(text: "Normalfall: oben auf „Pi automatisch suchen“ — nichts abtippen. Manuell nur für Profis (Tailscale-IP 100.x.x.x von unterwegs).")
+                    HintText(text: "Normalfall: oben auf „Pi automatisch suchen“ — nichts abtippen. Manuell nur für Profis (Heimnetz-IP zuhause, Tailscale-IP 100.x.x.x von unterwegs).")
                 }
 
                 Section {
@@ -142,66 +149,170 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - Fernzugriff (Tailscale)
+    // MARK: - Fernzugriff (Tailscale, explizites Opt-in)
+    //
+    // Nach dem lokalen Verbinden steht hier NUR „Heimnetz (lokal)".
+    // Remote per Tailscale wird erst eingerichtet, wenn man es antippt:
+    // Login-Link öffnen, Tailscale-App auch auf dem iPhone anmelden —
+    // danach gibt es „Remote jetzt nutzen" / „Zurück zu lokal" als Fallback.
 
     @ViewBuilder
     private var remoteAccessSection: some View {
         Section {
-            HStack {
-                Image(systemName: remoteIcon)
-                    .foregroundColor(remoteColor)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(remoteTitle).font(.subheadline).fontWeight(.medium)
+            if !settings.remoteEnabled {
+                // --- Noch nicht eingerichtet: lokal ist alles ---
+                HStack {
+                    Image(systemName: "house.fill").foregroundColor(.green)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Heimnetz (lokal)").font(.subheadline).fontWeight(.medium)
+                        Text("Für unterwegs noch nichts eingerichtet — alles läuft zuhause.")
+                            .font(.caption).foregroundColor(.secondary)
+                    }
+                }
+                if let r = remote, r.isRunning, let ip = r.tailscaleIp {
+                    // Pi-Daemon ist (von früher) eingeloggt — NICHT als „Aktiv"
+                    // verkaufen, sondern zur Übernahme anbieten.
+                    Text("Der Pi ist bereits bei Tailscale angemeldet (\(ip)) — in der App aber noch nicht als Remote eingerichtet.")
+                        .font(.caption).foregroundColor(.secondary)
+                    Button("Remote-Adresse übernehmen (\(ip))") {
+                        adoptRemote(ip: ip)
+                    }
+                    .disabled(vm.isDemo)
+                } else if let link = remote?.authUrl, !link.isEmpty {
+                    Text("Anmeldung angefangen, aber noch nicht abgeschlossen.")
+                        .font(.caption).foregroundColor(.secondary)
+                    Button {
+                        if let url = URL(string: link) { openURL(url) }
+                    } label: {
+                        Text("Anmeldung fortsetzen")
+                    }
+                    Button("Status erneut prüfen") {
+                        Task { await loadRemote() }
+                    }
+                    .disabled(remoteBusy)
+                } else {
+                    Button {
+                        Task { await enableRemote() }
+                    } label: {
+                        if remoteBusy { ProgressView().frame(maxWidth: .infinity) }
+                        else { Text("Remote-Fallback mit Tailscale einrichten").frame(maxWidth: .infinity) }
+                    }
+                    .disabled(remoteBusy || vm.isDemo)
                     if let m = remote?.message, !m.isEmpty {
                         Text(m).font(.caption).foregroundColor(.secondary)
                     }
                 }
-                Spacer()
-                if remoteBusy { ProgressView() }
-            }
-            if let r = remote, r.isRunning, let ip = r.tailscaleIp {
-                Button {
+            } else {
+                // --- Eingerichtet: Lokal bleibt Standard, Remote ist Fallback ---
+                HStack {
+                    Image(systemName: settings.isUsingRemote ? "globe" : "house.fill")
+                        .foregroundColor(settings.isUsingRemote ? .blue : .green)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(settings.isUsingRemote ? "Remote aktiv" : "Lokal aktiv")
+                            .font(.subheadline).fontWeight(.medium)
+                        Text(remoteLine).font(.caption).foregroundColor(.secondary)
+                    }
+                    Spacer()
+                    if remoteBusy { ProgressView() }
+                }
+                if !(remote?.isRunning ?? false) {
+                    Text("Pi meldet Tailscale gerade nicht als verbunden — ggf. Anmeldung erneuern.")
+                        .font(.caption).foregroundColor(.orange)
+                    Button {
+                        Task { await enableRemote() }
+                    } label: {
+                        Text("Erneut anmelden")
+                    }
+                    .disabled(remoteBusy || vm.isDemo)
+                }
+                if !settings.localServerURL.isEmpty && settings.serverURL != settings.localServerURL {
+                    Button("Zurück zu lokal (\(settings.localServerURL))") {
+                        useAddress(settings.localServerURL)
+                    }
+                }
+                if !settings.remoteServerURL.isEmpty && settings.serverURL != settings.remoteServerURL {
+                    Button("Remote jetzt nutzen (\(settings.remoteServerURL))") {
+                        useAddress(settings.remoteServerURL)
+                    }
+                }
+                if !settings.localServerURL.isEmpty && !settings.remoteServerURL.isEmpty {
+                    Button("Automatisch wählen (erreichbare Adresse nehmen)") {
+                        Task { await autoSelectAddress() }
+                    }
+                    .disabled(remoteBusy)
+                }
+                if remoteBusy { ProgressView().frame(maxWidth: .infinity) }
+                Button("Remote wieder entfernen", role: .destructive) {
                     var s = AppSettings.shared
-                    s.serverURL = "http://\(ip):8000"
-                    s.useTailscale = true
+                    s.remoteEnabled = false
+                    if s.isUsingRemote, !s.localServerURL.isEmpty {
+                        s.serverURL = s.localServerURL
+                    }
                     s.commit()
                     settings = AppSettings.shared
-                    WebSocketService.shared.disconnect()
-                    if s.autoConnect { WebSocketService.shared.connect() }
-                } label: {
-                    Text("Diese Adresse jetzt nutzen (\(ip))")
+                    commit()
                 }
-            } else if remote?.installed == false {
-                Text("Tailscale fehlt auf dem Pi. Einmal am Pi ausführen: sudo bambu tailscale")
-                    .font(.caption).foregroundColor(.secondary)
-            } else {
-                Button {
-                    Task { await enableRemote() }
-                } label: {
-                    if remoteBusy { ProgressView().frame(maxWidth: .infinity) }
-                    else { Text("Fernzugriff aktivieren").frame(maxWidth: .infinity) }
-                }
-                .disabled(remoteBusy || vm.isDemo)
             }
         } header: {
-            Text("Fernzugriff (Tailscale)")
+            Text("Verbindung: lokal & Remote")
         } footer: {
-            HintText(text: "Erst nötig, wenn du von unterwegs zugreifen willst. Zuhause reicht das Heimnetz. Beim Aktivieren öffnet sich einmalig die Tailscale-Anmeldung.")
+            HintText(text: "Zuhause immer lokal. Remote nur für unterwegs — braucht die Tailscale-App auf Pi UND iPhone (gleiches Konto).")
         }
     }
 
-    private var remoteTitle: String {
-        guard let r = remote else { return "Nicht geprüft" }
-        if !r.installed { return "Nicht verfügbar" }
-        if r.isRunning { return "Aktiv" }
-        if !(r.authUrl ?? "").isEmpty { return "Anmeldung offen" }
-        return "Nicht verbunden"
+    private var remoteLine: String {
+        var parts: [String] = []
+        if !settings.localServerURL.isEmpty { parts.append("Lokal: \(settings.localServerURL)") }
+        if !settings.remoteServerURL.isEmpty { parts.append("Remote: \(settings.remoteServerURL)") }
+        if let m = remote?.message, !m.isEmpty, remote?.isRunning != true { parts.append(m) }
+        return parts.joined(separator: " · ")
     }
-    private var remoteIcon: String {
-        (remote?.isRunning ?? false) ? "checkmark.circle.fill" : "network.slash"
+
+    /// Aktive Adresse wechseln (lokal ↔ remote) + Verbindung neu aufbauen.
+    private func useAddress(_ url: String) {
+        var s = AppSettings.shared
+        s.serverURL = url
+        s.commit()
+        settings = AppSettings.shared
+        WebSocketService.shared.disconnect()
+        if s.autoConnect && !s.demoMode { WebSocketService.shared.connect() }
+        Task { await PrinterViewModel.shared.loadStatus() }
     }
-    private var remoteColor: Color {
-        (remote?.isRunning ?? false) ? .green : .secondary
+
+    /// Pi-seitige Tailscale-Adresse in die App übernehmen (Opt-in),
+    /// aktiv bleibt aber bewusst die lokale Adresse.
+    private func adoptRemote(ip: String) {
+        var s = AppSettings.shared
+        s.remoteServerURL = "http://\(ip):8000"
+        s.remoteEnabled = true
+        s.useTailscale = true
+        s.commit()
+        settings = AppSettings.shared
+    }
+
+    /// Fallback: erreichbare Adresse nehmen — erst lokal, dann remote.
+    private func autoSelectAddress() async {
+        remoteBusy = true; defer { remoteBusy = false }
+        let s = AppSettings.shared
+        if !s.localServerURL.isEmpty, await healthOK(s.localServerURL) {
+            useAddress(s.localServerURL)
+            return
+        }
+        if !s.remoteServerURL.isEmpty, await healthOK(s.remoteServerURL) {
+            useAddress(s.remoteServerURL)
+            return
+        }
+        await loadRemote()
+    }
+
+    private func healthOK(_ base: String) async -> Bool {
+        let b = base.hasSuffix("/") ? String(base.dropLast()) : base
+        guard let endpoint = URL(string: b + "/health") else { return false }
+        var req = URLRequest(url: endpoint, timeoutInterval: 4)
+        req.setValue("Bearer \(AppSettings.shared.apiToken)", forHTTPHeaderField: "Authorization")
+        guard let (_, resp) = try? await URLSession.shared.data(for: req),
+              let http = resp as? HTTPURLResponse else { return false }
+        return http.statusCode == 200
     }
 
     private func loadRemote() async {
@@ -223,8 +334,11 @@ struct SettingsView: View {
                         if remote?.isRunning == true { break }
                     }
                 }
-            } else if r.isRunning {
-                remote = try? await APIService.shared.remoteAccessStatus()
+            } else if r.isRunning, let ip = r.tailscaleIp {
+                // Login fertig: Adresse merken + Opt-in setzen — aktiv
+                // bleibt bewusst die lokale Adresse (Remote ist Fallback).
+                adoptRemote(ip: ip)
+                await loadRemote()
             }
         } catch {
             remote = RemoteAccessStatus(installed: true, state: "error",
@@ -241,11 +355,15 @@ struct SettingsView: View {
     }
     private var connectionTitle: String {
         if vm.isDemo { return "Demo-Drucker aktiv" }
-        return vm.status != nil ? "Verbunden" : "Nicht verbunden"
+        guard vm.status != nil else { return "Nicht verbunden" }
+        return settings.isUsingRemote ? "Remote verbunden" : "Lokal verbunden"
     }
     private var connectionSubtitle: String {
         if vm.isDemo { return "Simulierter Bambu Lab A1" }
         if settings.serverURL.isEmpty { return "Keine Server-URL eingetragen" }
+        if settings.remoteEnabled, !settings.isUsingRemote {
+            return "\(settings.serverURL) · Remote bereit"
+        }
         return settings.serverURL
     }
 
@@ -388,7 +506,7 @@ private struct PiSearchSheet: View {
             do {
                 let claim = try await APIService.shared.claimPi(baseURL: pi.baseURL)
                 var s = AppSettings.shared
-                s.serverURL = pi.baseURL; s.apiToken = claim.apiToken
+                s.serverURL = pi.baseURL; s.localServerURL = pi.baseURL; s.apiToken = claim.apiToken
                 s.demoWanted = false; s.commit()
                 PrinterViewModel.shared.disableDemo()
                 await PrinterViewModel.shared.loadStatus()
