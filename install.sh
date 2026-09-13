@@ -25,6 +25,7 @@ REPO_URL="https://github.com/felix6191/bambu-pi-controller.git"
 INSTALL_DIR="/opt/bambu-pi-controller"
 SERVICE_USER="bambu"
 ENV_FILE="$INSTALL_DIR/pi_backend/.env"
+BUILT_MARKER="$INSTALL_DIR/.built_commit"
 
 log()  { echo -e "${BLUE}[INFO]${NC} $*"; }
 ok()   { echo -e "${GREEN}[✓]${NC} $*"; }
@@ -300,6 +301,25 @@ reset_pairing_when_ready() {
     reset_pairing_state
 }
 
+repo_head() { git -C "$INSTALL_DIR" rev-parse HEAD 2>/dev/null || echo ""; }
+
+image_ready() {
+    local img
+    img="$( cd "$INSTALL_DIR" && sudo -u "$SERVICE_USER" docker compose config --images 2>/dev/null | head -1 )"
+    [[ -n "$img" ]] && sudo -u "$SERVICE_USER" docker image inspect "$img" >/dev/null 2>&1
+}
+
+mark_built() {
+    repo_head > "$BUILT_MARKER" 2>/dev/null || true
+    chown "$SERVICE_USER:$SERVICE_USER" "$BUILT_MARKER" 2>/dev/null || true
+}
+
+built_is_current() {
+    [[ -f "$BUILT_MARKER" ]] || return 1
+    local head; head="$(repo_head)"
+    [[ -n "$head" && "$(cat "$BUILT_MARKER" 2>/dev/null)" == "$head" ]]
+}
+
 deploy() {
     title "Schritt 5/5 · Server starten"
     log "Baue und starte (erster Start lädt Docker-Bilder inkl. Slicer, dauert ein paar Minuten) …"
@@ -317,6 +337,7 @@ deploy() {
     if [[ "$ok_health" -eq 1 ]]; then
         ok "Server läuft!"
         reset_pairing_state
+        mark_built
         local health
         health=$(curl -sf http://localhost:8000/health 2>/dev/null || echo "")
         echo "  $health" | grep -q '"printer_connected":true' \
@@ -405,11 +426,22 @@ main() {
         fi
         setup_mdns
         cd "$INSTALL_DIR"
-        clean_old
-        sudo -u "$SERVICE_USER" docker compose build
-        fix_data_perms
-        sudo -u "$SERVICE_USER" docker compose up -d
+        # Nur neu bauen, wenn sich der Commit wirklich geändert hat. Sonst
+        # reicht ein (idempotentes) Starten. Docker-Layer-Cache bleibt erhalten,
+        # dadurch wird nie unnötig der große Orca-Download wiederholt.
+        if built_is_current && image_ready; then
+            log "Bereits auf dem neuesten Stand ($(git -C "$INSTALL_DIR" rev-parse --short HEAD)) — kein Neubau nötig."
+            sudo -u "$SERVICE_USER" docker compose up -d
+        else
+            log "Baue nur die Änderungen neu (Docker-Cache) …"
+            sudo -u "$SERVICE_USER" docker compose build
+            fix_data_perms
+            sudo -u "$SERVICE_USER" docker compose up -d
+            # Alte, jetzt verwaiste Images freigeben — Cache bleibt fürs nächste Update.
+            sudo -u "$SERVICE_USER" docker image prune -f >/dev/null 2>&1 || true
+        fi
         reset_pairing_when_ready
+        if curl -sf http://localhost:8000/health >/dev/null 2>&1; then mark_built; fi
         ok "Aktualisiert ($(git -C "$INSTALL_DIR" rev-parse --short HEAD 2>/dev/null || echo '?'))."
         exit 0
     fi
@@ -420,11 +452,11 @@ main() {
         wizard
         setup_mdns
         cd "$INSTALL_DIR"
-        clean_old
-        sudo -u "$SERVICE_USER" docker compose build
+        # Nur .env geändert -> kein Neubau nötig, Container übernimmt neue Werte.
         fix_data_perms
         sudo -u "$SERVICE_USER" docker compose up -d
         reset_pairing_when_ready
+        if curl -sf http://localhost:8000/health >/dev/null 2>&1; then mark_built; fi
         ok "Neu konfiguriert und neu gestartet."
         print_summary
         exit 0

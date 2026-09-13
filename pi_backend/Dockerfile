@@ -11,6 +11,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PIP_NO_CACHE_DIR=1
 
 # System-Python + Laufzeitbibliotheken für OrcaSlicer (headless).
+# Dieser Layer ändert sich praktisch nie -> bleibt beim Update gecacht.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         python3 python3-venv python3-pip curl ca-certificates \
         libgl1 libglib2.0-0 libnss3 libx11-6 libx11-xcb1 libxcb1 libxext6 \
@@ -22,16 +23,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libxcb-xinerama0 libxcb-xkb1 libegl1 libopengl0 \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
-COPY pyproject.toml .
-COPY app ./app
-RUN python3 -m venv /opt/venv \
-    && /opt/venv/bin/pip install --upgrade pip \
-    && /opt/venv/bin/pip install .
-ENV PATH="/opt/venv/bin:${PATH}"
-
-# OrcaSlicer passend zur Architektur herunterladen und entpacken.
-# AppImage braucht kein FUSE: einmal mit --appimage-extract auspacken.
+# WICHTIG für schnelle Updates: OrcaSlicer ZUERST laden. Der Download ist
+# groß (~135 MB) und hängt NICHT vom App-Code ab. So bleibt dieser Layer bei
+# Code-Änderungen unverändert im Docker-Cache und wird nicht neu geladen.
 RUN set -eux; \
     case "${TARGETARCH}" in \
         arm64) url="https://github.com/OrcaSlicer/OrcaSlicer/releases/download/v${ORCA_VERSION}/OrcaSlicer_Linux_AppImage_Ubuntu2404_aarch64_V${ORCA_VERSION}.AppImage" ;; \
@@ -46,6 +40,22 @@ RUN set -eux; \
         rm -f /tmp/orca.AppImage; \
         ln -sf /opt/orcaslicer/AppRun /usr/local/bin/orcaslicer; \
     fi
+
+WORKDIR /app
+
+# Python-Umgebung + NUR die Abhängigkeiten (hängt nur an pyproject.toml).
+RUN python3 -m venv /opt/venv \
+    && /opt/venv/bin/pip install --upgrade pip
+COPY pyproject.toml .
+RUN set -f; \
+    deps="$(python3 -c "import tomllib; d=tomllib.load(open('pyproject.toml','rb')); print(' '.join(d['project']['dependencies']))")"; \
+    /opt/venv/bin/pip install $deps setuptools wheel
+
+# App-Code zuletzt: Änderungen hier invalidieren nur noch den kleinen
+# Package-Install-Layer (schnell, ohne erneuten Download der Abhängigkeiten).
+COPY app ./app
+RUN /opt/venv/bin/pip install --no-deps --no-build-isolation .
+ENV PATH="/opt/venv/bin:${PATH}"
 
 # /data muss dem Container-User gehören — sonst kann er pairing.json/jobs
 # nicht schreiben und die App bekommt HTTP 500 (genau der Pairing-Fehler).

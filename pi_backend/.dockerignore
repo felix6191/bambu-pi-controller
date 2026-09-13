@@ -1,0 +1,12 @@
+# Hält den Build-Kontext klein -> schnellere, stabilere Layer-Caches.
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.DS_Store
+storage/
+tests/
+.env
+*.log
