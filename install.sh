@@ -132,6 +132,29 @@ EOF
     ok "Tailscale bereit (Login in der App unter Einstellungen → Fernzugriff)"
 }
 
+update_repo() {
+    # Dateien auf den neuesten Stand bringen. Bewusst robust:
+    #  - git als SERVICE_USER (sonst "dubious ownership" als root -> Pull scheitert still)
+    #  - fetch + hard reset, damit lokale Änderungen das Update nicht blockieren
+    #  - ungetrackte Dateien (.env, IPHONE_SETUP.txt) bleiben erhalten
+    if [[ ! -d "$INSTALL_DIR/.git" ]]; then return 1; fi
+    git config --global --add safe.directory "$INSTALL_DIR" >/dev/null 2>&1 || true
+    log "Lade neueste Dateien …"
+    if ! sudo -u "$SERVICE_USER" git -C "$INSTALL_DIR" fetch --depth 1 origin main >/dev/null 2>&1 \
+       && ! git -C "$INSTALL_DIR" fetch --depth 1 origin main >/dev/null 2>&1; then
+        warn "Konnte keine neuen Dateien laden (Internet? GitHub?). Nutze vorhandene."
+        return 1
+    fi
+    if sudo -u "$SERVICE_USER" git -C "$INSTALL_DIR" reset --hard FETCH_HEAD >/dev/null 2>&1 \
+       || git -C "$INSTALL_DIR" reset --hard FETCH_HEAD >/dev/null 2>&1; then
+        chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR" 2>/dev/null || true
+        ok "Dateien aktualisiert ($(git -C "$INSTALL_DIR" rev-parse --short HEAD 2>/dev/null || echo '?'))"
+        return 0
+    fi
+    warn "Konnte Dateien nicht übernehmen — nutze vorhandene."
+    return 1
+}
+
 setup_user_repo() {
     title "Schritt 2/5 · Programmdateien holen"
     if ! id "$SERVICE_USER" &>/dev/null; then
@@ -139,8 +162,7 @@ setup_user_repo() {
         usermod -aG docker "$SERVICE_USER"
     fi
     if [[ -d "$INSTALL_DIR/.git" ]]; then
-        log "Aktualisiere Dateien …"
-        git -C "$INSTALL_DIR" pull --ff-only origin main 2>/dev/null || warn "Konnte nicht aktualisieren — nutze vorhandene Dateien."
+        update_repo || true
     else
         log "Lade Dateien herunter …"
         git clone --depth 1 "$REPO_URL" "$INSTALL_DIR" || err "Download fehlgeschlagen. Internet prüfen und erneut starten."
@@ -329,17 +351,18 @@ main() {
 
     if [[ "$MODE" == "update" ]]; then
         [[ -d "$INSTALL_DIR/.git" ]] || err "Nichts installiert. Erst normal installieren."
-        cd "$INSTALL_DIR"
-        git pull --ff-only origin main
+        update_repo || true
+        # Helfer aktualisieren (nach dem Datei-Update!)
         if [[ -f "$INSTALL_DIR/pi_helpers/bambu" ]]; then
             cp "$INSTALL_DIR/pi_helpers/bambu" /usr/local/bin/bambu
             chmod +x /usr/local/bin/bambu
         fi
         setup_mdns
+        cd "$INSTALL_DIR"
         sudo -u "$SERVICE_USER" docker compose build
         fix_data_perms
         sudo -u "$SERVICE_USER" docker compose up -d
-        ok "Aktualisiert."
+        ok "Aktualisiert ($(git -C "$INSTALL_DIR" rev-parse --short HEAD 2>/dev/null || echo '?'))."
         exit 0
     fi
 
