@@ -214,12 +214,15 @@ cd ios_app
 ## Troubleshooting
 
 ### Drucker verbindet nicht
-- Der Container läuft im **Host-Netz** und scannt das echte Heimnetz (alle /24). Nach dem Update einmal neu bauen: `sudo bambu update`.
-- Am Drucker muss der **LAN-/Entwicklermodus** an sein (nicht Cloud-Modus), sonst antwortet Port 8883 nicht.
+- Der Pi findet den Drucker per **SSDP** (Standard-Discovery von Bambu Lab) — der Drucker muss dafür im **LAN-/Entwicklermodus** sein (nicht Cloud-Modus). Fallback ist ein Port-Scan der Heimnetz-IPs auf 8883.
+- Der Container läuft im **Host-Netz**; nach dem Update einmal neu bauen: `sudo bambu update`.
 - Entwicklermodus an? IP korrekt? Access Code (8 Zeichen) und Seriennummer korrekt?
 - Der Pi prüft erst, ob Port 8883 offen ist, und unterscheidet in der App „nicht erreichbar" von „erreichbar, aber Zugangsdaten falsch".
 - Logs: `docker compose logs bambu-controller`
 - MQTT testen: `mosquitto_sub -h <PRINTER_IP> -u bblp -P <ACCESS_CODE> -t 'device/+/push'`
+
+### App merkt sich alte Einrichtung
+- Solange das Tutorial **nicht komplett abgeschlossen** wurde, setzt die App ihre Einstellungen bei jedem frischen Start zurück (Pi wird wieder freigegeben und neu gesucht). Nach abgeschlossenem Setup bleiben die Einstellungen erhalten.
 
 ### Kein Remote-Zugriff
 - Erst in der App: **Einstellungen → Fernzugriff aktivieren** (öffnet die Tailscale-Anmeldung).

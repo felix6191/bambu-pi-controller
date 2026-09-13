@@ -5,6 +5,7 @@ import os
 import shutil
 import socket
 import subprocess
+import time
 from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -293,48 +294,105 @@ def _local_prefixes() -> list[str]:
     return sorted(prefixes)
 
 
+# Bambu-Drucker melden sich per SSDP (Standardweg, den auch Bambu Studio und
+# die Home-Assistant-Integration nutzen) — kein Port-Scan nötig.
+SSDP_GROUP = "239.255.255.250"
+SSDP_PORT = 1900
+SSDP_ST = "urn:bambulab-com:device:3dprinter:1"
+
+
+def _ssdp_discover_sync(timeout: float = 4.0) -> dict[str, int]:
+    """SSDP M-SEARCH senden und Antworten der Bambu-Drucker einsammeln."""
+    msg = "\r\n".join([
+        "M-SEARCH * HTTP/1.1",
+        f"HOST: {SSDP_GROUP}:{SSDP_PORT}",
+        'MAN: "ssdp:discover"',
+        "MX: 2",
+        f"ST: {SSDP_ST}",
+        "", "",
+    ]).encode()
+    found: dict[str, int] = {}
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
+        sock.settimeout(0.5)
+        sock.bind(("", 0))
+        t0 = time.monotonic()
+        last_send = 0.0
+        end = t0 + timeout
+        while time.monotonic() < end:
+            # M-SEARCH mehrfach senden — Geräte verpassen den ersten Schuss gern.
+            if time.monotonic() - last_send > 1.2:
+                try:
+                    sock.sendto(msg, (SSDP_GROUP, SSDP_PORT))
+                except OSError:
+                    pass
+                last_send = time.monotonic()
+            try:
+                data, addr = sock.recvfrom(65535)
+            except socket.timeout:
+                continue
+            except OSError:
+                break
+            text = data.decode("utf-8", "ignore")
+            # Antwort muss von einem Bambu-Drucker kommen (ST/Server/USN prüfen)
+            if "bambulab" in text.lower() or SSDP_ST.lower() in text.lower():
+                ip = addr[0]
+                found[ip] = int((time.monotonic() - t0) * 1000)
+        sock.close()
+    except Exception as e:
+        logger.warning(f"SSDP discovery failed: {e}")
+    return found
+
+
 @router.post("/printer-scan")
 async def printer_scan(deep: bool = True):
-    """Pi sucht den A1 selbst im Heimnetz (Port 8883).
+    """Drucker im Heimnetz finden.
 
-    Der Pi läuft im Host-Netz und scannt daher das echte Heimnetz. Es werden
-    ALLE eigenen /24-Präfixe abgeklopft (LAN/WLAN), mit großzügigem Timeout
-    und zwei Durchgängen — WLAN braucht oft etwas länger.
+    1) SSDP (Bambu-Standard) — schnell und zuverlässig.
+    2) Fallback: TCP-Scan der eigenen /24-Netze auf Port 8883.
     """
     import asyncio as _aio
-    prefixes = _local_prefixes()
-    timeout = 2.5 if deep else 1.0
-    rounds = 2 if deep else 1
+    loop = _aio.get_running_loop()
 
-    async def probe(ip: str) -> dict | None:
-        t0 = _aio.get_running_loop().time()
-        try:
-            conn = _aio.open_connection(ip, 8883)
-            _reader, writer = await _aio.wait_for(conn, timeout=timeout)
-            writer.close()
+    # 1) SSDP
+    ssdp = await loop.run_in_executor(None, _ssdp_discover_sync, 4.0)
+    found: dict[str, dict] = {ip: {"ip": ip, "ms": ms, "via": "ssdp"} for ip, ms in ssdp.items()}
+
+    # 2) Fallback-Port-Scan, wenn SSDP nichts fand
+    if not found:
+        prefixes = _local_prefixes()
+        timeout = 2.5 if deep else 1.0
+        rounds = 2 if deep else 1
+
+        async def probe(ip: str) -> dict | None:
+            t0 = loop.time()
             try:
-                await writer.wait_closed()
+                conn = _aio.open_connection(ip, 8883)
+                _reader, writer = await _aio.wait_for(conn, timeout=timeout)
+                writer.close()
+                try:
+                    await writer.wait_closed()
+                except Exception:
+                    pass
+                return {"ip": ip, "ms": int((loop.time() - t0) * 1000), "via": "tcp"}
             except Exception:
-                pass
-            ms = int((_aio.get_running_loop().time() - t0) * 1000)
-            return {"ip": ip, "ms": ms}
-        except Exception:
-            return None
+                return None
 
-    sem = _aio.Semaphore(128)
-    found: dict[str, dict] = {}
+        sem = _aio.Semaphore(128)
 
-    async def guarded(ip: str) -> None:
-        async with sem:
-            r = await probe(ip)
-            if r and r["ip"] not in found:
-                found[r["ip"]] = r
+        async def guarded(ip: str) -> None:
+            async with sem:
+                r = await probe(ip)
+                if r and r["ip"] not in found:
+                    found[r["ip"]] = r
 
-    for _round in range(rounds):
-        targets = [f"{p}.{i}" for p in prefixes for i in range(1, 255)]
-        await _aio.gather(*[guarded(ip) for ip in targets])
-        if found:
-            break
+        for _round in range(rounds):
+            targets = [f"{p}.{i}" for p in prefixes for i in range(1, 255)]
+            await _aio.gather(*[guarded(ip) for ip in targets])
+            if found:
+                break
 
     results = sorted(found.values(), key=lambda r: r["ms"])
-    return {"prefix": ", ".join(f"{p}.0/24" for p in prefixes), "prefixes": prefixes, "candidates": results}
+    return {"prefix": ", ".join(f"{p}.0/24" for p in _local_prefixes()), "candidates": results}

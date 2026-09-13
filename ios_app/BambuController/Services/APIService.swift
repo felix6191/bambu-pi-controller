@@ -141,6 +141,17 @@ class APIService: ObservableObject {
         try await request("/pairing/reset", method: "POST", APIResponse.self)
     }
 
+    /// Repair mit expliziter URL/Token (z. B. beim Aufräumen eines nicht
+    /// abgeschlossenen Setups, wenn die aktuellen Einstellungen schon weg sind).
+    func resetPairing(baseURL: String, token: String) async {
+        let base = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
+        guard let url = URL(string: "\(base)/api/v1/pairing/reset") else { return }
+        var req = URLRequest(url: url, timeoutInterval: 10)
+        req.httpMethod = "POST"
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        _ = try? await session.data(for: req)
+    }
+
     // Files: STL upload (multipart) + jobs
     func uploadFile(data: Data, filename: String) async throws -> SliceJob {
         guard !baseURL.isEmpty, let url = URL(string: "\(baseURL)/api/v1/files/upload") else { throw APIError.invalidURL }

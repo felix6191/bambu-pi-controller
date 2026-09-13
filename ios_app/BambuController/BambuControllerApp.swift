@@ -4,7 +4,16 @@ import SwiftUI
 @main
 struct BambuControllerApp: App {
     @StateObject private var appState = AppState.shared
-    @State private var onboarded = AppSettings.shared.onboarded
+    @State private var onboarded: Bool
+
+    init() {
+        // Tutorial noch nicht abgeschlossen? Dann beim frischen Start alles
+        // zurücksetzen: Pi neu suchen, neu verbinden, Drucker neu einrichten.
+        if !AppSettings.shared.onboarded {
+            AppSettings.resetForFreshOnboarding()
+        }
+        _onboarded = State(initialValue: AppSettings.shared.onboarded)
+    }
 
     var body: some Scene {
         WindowGroup {

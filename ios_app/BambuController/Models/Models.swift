@@ -486,6 +486,23 @@ struct AppSettings: Codable {
         return AppSettings()
     }
 
+    /// Beim frischen App-Start aufrufen, solange das Tutorial NICHT komplett
+    /// absolviert wurde: alle Einstellungen verwerfen, damit Pi und Drucker
+    /// jedes Mal neu gesucht, zugeteilt und eingerichtet werden. Der Pi wird
+    /// (mit dem alten Token) freigegeben, damit das Pairing erneut klappt.
+    static func resetForFreshOnboarding() {
+        let old = load()
+        UserDefaults.standard.removeObject(forKey: "AppSettings")
+        UserDefaults.standard.removeObject(forKey: "share.serverURL")
+        UserDefaults.standard.removeObject(forKey: "share.apiToken")
+        shared = AppSettings()
+        if !old.serverURL.isEmpty && !old.apiToken.isEmpty {
+            let base = old.baseURL
+            let token = old.apiToken
+            Task { @MainActor in await APIService.shared.resetPairing(baseURL: base, token: token) }
+        }
+    }
+
     func save() { if let d = try? JSONEncoder().encode(self) { UserDefaults.standard.set(d, forKey: "AppSettings") } }
 
     /// Persist AND publish to the live singleton so API/WS pick up changes immediately.
