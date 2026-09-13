@@ -108,7 +108,7 @@ cp .env.example .env
 ```bash
 # Installation passiert schon durch install.sh; Login bei Bedarf:
 sudo bambu tailscale
-# Oder aus der App: Einstellungen → Fernzugriff aktivieren
+# Oder aus der App: Einstellungen → Verbindung → Remote antippen
 ```
 
 ### 4. Docker Compose starten
@@ -221,9 +221,10 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 - Dasselbe Handy darf sich immer erneut verbinden; nur ein anderes Handy bekommt „gehört schon zu einem Handy". Manuell freigeben: `sudo bambu repair`.
 
 ### Kein Remote-Zugriff
-- Erst in der App: **Einstellungen → Fernzugriff aktivieren** (öffnet die Tailscale-Anmeldung).
+- In der App: **Einstellungen → Verbindung → Remote** antippen (öffnet einmalig die Tailscale-Anmeldung). Danach zwischen **Lokal** und **Remote** wechseln.
+- Wichtig: Die **Tailscale-App muss auch auf dem iPhone** installiert und mit demselben Konto angemeldet sein — sonst ist die 100.x-Adresse nicht erreichbar.
 - Alternativ am Pi: `sudo bambu tailscale`
-- `tailscale ip -4` auf Pi zeigt 100.x.x.x? Dann in der App „Diese Adresse jetzt nutzen".
+- Diagnose auf dem Pi: `sudo bambu logs` (der Server meldet genau, ob Tailscale fehlt, der Dienst steht oder nur der Login fehlt).
 
 ### Pairing schlägt fehl (Fehler 500)
 - Früher verursachten falsche Rechte am Docker-Volume `/data` den 500er — ist behoben.
@@ -235,8 +236,9 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 - Image neu bauen (enthält den Slicer): `sudo bambu update`
 
 ### Kamera geht nicht
-- A1 Kamera-Stream URL: `http://<PRINTER_IP>:8080/stream`
-- In `.env`: `CAMERA_URL=http://192.168.1.100:8080/stream`
+- Die A1-Kamera braucht **keine Konfiguration**: Der Pi holt das Bild direkt vom Drucker (verschlüsselter Kamerastream, Port 6000) und reicht es als MJPEG/Snapshot an die App weiter. Voraussetzung ist nur die normale Drucker-Einrichtung in der App (IP + Access Code) sowie LAN-/Entwicklermodus am Drucker.
+- Nur als Override (z. B. USB-Kamera am Pi) in `.env`: `CAMERA_URL=http://…/stream`
+- Logs: `sudo bambu logs` (der genaue Kamerafehler steht dort).
 
 ## Sicherheit
 

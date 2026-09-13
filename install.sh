@@ -365,7 +365,7 @@ write_iphone_sheet() {
         echo "  Server URL:  $server_url"
         echo "  API Token:   $api_token"
         echo ""
-        echo "Fernzugriff von unterwegs: in der App unter Einstellungen → Fernzugriff."
+         echo "Fernzugriff von unterwegs: in der App unter Einstellungen → Verbindung → Remote."
         echo "Diese Datei liegt auf dem Pi: $INSTALL_DIR/IPHONE_SETUP.txt"
         echo "Jederzeit erneut anzeigen mit:  sudo bambu iphone"
     } > "$INSTALL_DIR/IPHONE_SETUP.txt"

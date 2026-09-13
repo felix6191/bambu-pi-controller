@@ -152,49 +152,77 @@ class RemoteAccessResult(BaseModel):
     message: str = ""
 
 
+TS_SOCK = "/var/run/tailscale/tailscaled.sock"
+
+
 def _ts_bin() -> str | None:
     return shutil.which(TAILSCALE)
 
 
-def _ts_status_sync() -> dict | None:
-    """`tailscale status --json` im Host-Netz (Socket ist in den Container gemountet)."""
+def _ts_diagnose_sync() -> tuple[dict | None, str]:
+    """`tailscale status --json` plus Fehlerursache.
+
+    Returns (data, problem) mit problem in {"", "missing", "daemon_down",
+    "logged_out", "no_response"}. Der Container läuft als Nicht-root —
+    ohne lesbaren Daemon-Socket (Host-Mount) kommt nur Müll zurück;
+    das wird hier sauber unterschieden statt „unavailable".
+    """
     binary = _ts_bin()
     if binary is None:
-        return None
+        return None, "missing"
+    if not os.path.exists(TS_SOCK):
+        return None, "daemon_down"
     try:
         proc = subprocess.run([binary, "status", "--json"], capture_output=True, text=True, timeout=6)
-    except Exception:
-        return None
-    if proc.returncode != 0 or not proc.stdout.strip():
-        return None
-    try:
-        return json.loads(proc.stdout)
-    except Exception:
-        return None
+    except Exception as e:
+        logger.warning(f"tailscale status failed: {e}")
+        return None, "no_response"
+    out = (proc.stdout or "").strip()
+    if out:
+        try:
+            return json.loads(out), ""
+        except Exception:
+            pass
+    err = ((proc.stderr or "") + out).lower()
+    if "logged out" in err or "needslogin" in err.replace(" ", ""):
+        return None, "logged_out"
+    if "no such file" in err or "not running" in err or "permission denied" in err or "connect" in err:
+        return None, "daemon_down"
+    logger.warning(f"tailscale status rc={proc.returncode} err={proc.stderr[:200]!r}")
+    return None, "no_response"
 
 
-async def _ts_status() -> dict | None:
+async def _ts_diagnose() -> tuple[dict | None, str]:
     import asyncio as _aio
-    return await _aio.get_running_loop().run_in_executor(None, _ts_status_sync)
+    return await _aio.get_running_loop().run_in_executor(None, _ts_diagnose_sync)
 
 
-def _ts_result(data: dict | None, fallback_msg: str = "") -> RemoteAccessResult:
-    if data is None:
-        return RemoteAccessResult(installed=False, state="unavailable", message=fallback_msg)
-    state = str(data.get("BackendState", "unknown"))
-    auth = str(data.get("AuthURL", "") or "")
-    ips = [ip for ip in (data.get("TailscaleIPs") or []) if ":" not in ip]
-    return RemoteAccessResult(installed=True, state=state, auth_url=auth,
-                              tailscale_ip=(ips[0] if ips else None))
+def _ts_result(data: dict | None, problem: str = "") -> RemoteAccessResult:
+    if data is not None:
+        state = str(data.get("BackendState", "unknown"))
+        auth = str(data.get("AuthURL", "") or "")
+        ips = [ip for ip in (data.get("TailscaleIPs") or []) if ":" not in ip]
+        msg = "Fernzugriff aktiv." if state == "Running" and ips else ""
+        return RemoteAccessResult(installed=True, state=state, auth_url=auth,
+                                  tailscale_ip=(ips[0] if ips else None), message=msg)
+    if problem == "missing":
+        return RemoteAccessResult(installed=False, state="unavailable",
+            message="Tailscale fehlt auf dem Pi. Einmal ausführen: sudo bambu tailscale")
+    if problem == "daemon_down":
+        return RemoteAccessResult(installed=True, state="unavailable",
+            message="Tailscale-Dienst läuft nicht. Auf dem Pi: sudo bambu tailscale (Details: sudo bambu logs)")
+    if problem == "logged_out":
+        return RemoteAccessResult(installed=True, state="NeedsLogin",
+            message="Noch nicht bei Tailscale angemeldet — unten einrichten.")
+    return RemoteAccessResult(installed=True, state="unavailable",
+        message="Tailscale antwortet nicht. Auf dem Pi: sudo bambu tailscale (Details: sudo bambu logs)")
 
 
 @router.get("/remote-access", response_model=RemoteAccessResult)
 async def remote_access_status():
     """Aktueller Fernzugriff-Status (ohne Login)."""
-    if _ts_bin() is None:
-        return RemoteAccessResult(installed=False, state="unavailable",
-            message="Tailscale fehlt auf dem Pi. Einmal ausführen: sudo bambu tailscale")
-    return _ts_result(await _ts_status(), "Tailscale antwortet nicht. Auf dem Pi: sudo bambu tailscale")
+    data, problem = await _ts_diagnose()
+    return _ts_result(data, problem)
 
 
 @router.post("/remote-access", response_model=RemoteAccessResult)
@@ -205,15 +233,34 @@ async def remote_access_start():
     if binary is None:
         return RemoteAccessResult(installed=False, state="unavailable",
             message="Tailscale fehlt auf dem Pi. Einmal ausführen: sudo bambu tailscale")
+    if not os.path.exists(TS_SOCK):
+        return RemoteAccessResult(installed=True, state="unavailable",
+            message="Tailscale-Dienst läuft nicht. Auf dem Pi: sudo bambu tailscale")
     try:
-        subprocess.Popen([binary, "up", "--hostname", TS_HOSTNAME, "--accept-routes"],
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        proc = subprocess.Popen([binary, "up", "--hostname", TS_HOSTNAME, "--accept-routes"],
+                                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
     except Exception as e:
         logger.error(f"tailscale up failed: {e}")
         return RemoteAccessResult(installed=True, state="error", message=f"Start fehlgeschlagen: {e}")
+    # Falls `up` sofort stirbt (z. B. keine Rechte, Daemon weg), Fehler
+    # direkt melden statt 15 s ins Leere zu pollen.
+    try:
+        rc = await _aio.get_running_loop().run_in_executor(None, proc.wait, 3.0)
+        if rc is not None and rc != 0:
+            err = ""
+            try:
+                _, err_out = proc.communicate(timeout=2)
+                err = (err_out or "").strip()
+            except Exception:
+                pass
+            logger.error(f"tailscale up exited rc={rc}: {err[:300]}")
+            return RemoteAccessResult(installed=True, state="error",
+                message=f"Tailscale-Start abgelehnt ({err[:150] or 'siehe sudo bambu logs'}). Auf dem Pi: sudo bambu tailscale")
+    except Exception:
+        pass  # läuft noch — normal, Login wartet auf den Browser
     # Kurz warten, bis Login-Link oder Verbindung bereitsteht
     for _ in range(15):
-        data = await _ts_status()
+        data, problem = await _ts_diagnose()
         if data is not None:
             state = str(data.get("BackendState", "unknown"))
             auth = str(data.get("AuthURL", "") or "")
@@ -224,6 +271,9 @@ async def remote_access_start():
             if auth:
                 return RemoteAccessResult(installed=True, state=state, auth_url=auth,
                                           message="Zum Aktivieren Link öffnen und anmelden.")
+        elif problem == "daemon_down":
+            return RemoteAccessResult(installed=True, state="error",
+                message="Tailscale-Dienst gestoppt. Auf dem Pi: sudo bambu tailscale")
         await _aio.sleep(1)
     return RemoteAccessResult(installed=True, state="starting",
                               message="Anmeldung läuft — bitte gleich den Link öffnen.")
