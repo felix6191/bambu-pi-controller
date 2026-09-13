@@ -18,8 +18,14 @@ case "$cmd" in
     echo ""
     echo "— Adressen —"
     echo "LAN:       http://$(hostname -I | awk '{print $1}'):8000"
-    if command -v tailscale &>/dev/null; then
-      echo "Tailscale:  http://$(tailscale ip -4 2>/dev/null || echo 'nicht verbunden'):8000"
+    echo ""
+    echo "— Fernzugriff (Cloudflare Quick Tunnel) —"
+    TOKEN=$(grep "^API_TOKEN=" "$INSTALL_DIR/pi_backend/.env" 2>/dev/null | cut -d= -f2)
+    if [[ -n "$TOKEN" ]]; then
+      curl -s -H "Authorization: Bearer $TOKEN" \
+        http://localhost:8000/api/v1/system/remote-access || echo "Server antwortet nicht"
+    else
+      echo "Nicht konfiguriert — erst install.sh laufen lassen."
     fi
     ;;
   iphone)
@@ -46,28 +52,24 @@ case "$cmd" in
     if [[ -z "$TOKEN" ]]; then echo "Kein Token gefunden — erst install.sh laufen lassen."; exit 1; fi
     curl -sf -X POST -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/v1/pairing/reset && echo "Bereit — in der App erneut verbinden."
     ;;
-  tailscale)
-    # Fernzugriff per Tailscale aktivieren (Login-Link erscheint hier).
-    if ! command -v tailscale &>/dev/null; then
-      echo "Tailscale wird installiert …"
-      curl -fsSL https://tailscale.com/install.sh | sh
-    fi
-    systemctl enable --now tailscaled 2>/dev/null || true
+  tunnel)
+    # Fernzugriff per Cloudflare Quick Tunnel (kein Konto, kein Login).
+    TOKEN=$(grep "^API_TOKEN=" "$INSTALL_DIR/pi_backend/.env" 2>/dev/null | cut -d= -f2)
+    if [[ -z "$TOKEN" ]]; then echo "Kein Token gefunden — erst install.sh laufen lassen."; exit 1; fi
+    ACTION="${2:-start}"
+    URL="http://localhost:8000/api/v1/system/remote-access"
+    case "$ACTION" in
+      stop)
+        curl -sf -X DELETE -H "Authorization: Bearer $TOKEN" "$URL" ;;
+      status)
+        curl -sf -H "Authorization: Bearer $TOKEN" "$URL" ;;
+      *)
+        curl -sf -X POST -H "Authorization: Bearer $TOKEN" "$URL" ;;
+    esac
     echo ""
-    echo "Starte Anmeldung. Öffne den gleich erscheinenden Link auf dem Handy/PC:"
-    echo ""
-    tailscale up --hostname=bambu-pi --accept-routes || true
-    echo ""
-    IP=$(tailscale ip -4 2>/dev/null || echo "")
-    if [[ -n "$IP" ]]; then
-      echo "✅ Fernzugriff aktiv. Tailscale-IP: $IP"
-      echo "In der App: Einstellungen → Server URL auf http://$IP:8000 setzen."
-    else
-      echo "Noch nicht verbunden — Login abschließen und 'sudo bambu tailscale' erneut starten."
-    fi
     ;;
   *)
-    echo "Benutzung: sudo bambu {status|iphone|logs|restart|update|reconfigure|repair|tailscale}"
+    echo "Benutzung: sudo bambu {status|iphone|logs|restart|update|reconfigure|repair|tunnel}"
     echo "  status      Zeigt Container, Gesundheit und Adressen"
     echo "  iphone      Zeigt Server-URL + Token für die iPhone-App"
     echo "  logs        Live-Protokoll des Servers"
@@ -75,6 +77,6 @@ case "$cmd" in
     echo "  update      Neueste Version holen + neu starten"
     echo "  reconfigure Zugangs-Token neu erzeugen"
     echo "  repair      Pi für ein neues Handy freigeben"
-    echo "  tailscale   Fernzugriff per Tailscale-Login aktivieren"
+    echo "  tunnel      Fernzugriff starten (tunnel {start|status|stop})"
     ;;
 esac

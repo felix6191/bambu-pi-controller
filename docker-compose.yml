@@ -11,14 +11,10 @@ services:
       - path: ./pi_backend/.env
         required: false
     # Host-Netz ist wichtig: Nur so sieht der Pi das Heimnetz (Drucker-Suche,
-    # MQTT, FTP) statt nur das Docker-Netz. Tailscale läuft ebenfalls am Host.
+    # MQTT, FTP) statt nur das Docker-Netz.
     network_mode: host
     volumes:
       - bambu-data:/data
-      # Fernzugriff (Tailscale) wird bei Bedarf aus der App gestartet:
-      # Host-CLI + Socket in den Container reichen, kein zweiter Container.
-      - /usr/bin/tailscale:/usr/local/bin/tailscale:ro
-      - /var/run/tailscale:/var/run/tailscale
     environment:
       - STORAGE_DIR=/data
       - LOG_LEVEL=INFO

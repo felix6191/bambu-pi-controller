@@ -1,11 +1,12 @@
 """System API routes."""
+import asyncio
 import ipaddress
 import json
 import os
 import platform
+import re
 import shutil
 import socket
-import subprocess
 import time
 from pathlib import Path
 
@@ -18,9 +19,6 @@ from app.core import state as app_state
 from app.core.config import persisted_printer_file, settings
 
 router = APIRouter()
-
-TAILSCALE = "tailscale"
-TS_HOSTNAME = "bambu-pi"
 
 
 def _env_file() -> Path:
@@ -145,176 +143,188 @@ async def _printer_port_open(host: str, port: int, timeout: float = 3.0) -> bool
         return False
 
 
-# ------------------------------------------------------- remote access (Tailscale) ---
+# --------------------------------------------------- remote access (Cloudflare) ---
 
 class RemoteAccessResult(BaseModel):
     installed: bool
     state: str
+    provider: str = "cloudflare"
+    remote_url: str = ""
+    message: str = ""
     auth_url: str = ""
     tailscale_ip: str | None = None
-    message: str = ""
 
 
-TS_SOCK = "/var/run/tailscale/tailscaled.sock"
+CLOUDFLARED = "cloudflared"
+CF_TARGET = "http://localhost:8000"
+CF_START_TIMEOUT = 35.0
+CF_CANDIDATES: tuple[str, ...] = ("/usr/local/bin/cloudflared", "/usr/bin/cloudflared")
+CF_URL_RE = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com")
+CF_MISSING_MSG = ("cloudflared fehlt auf dem Pi. Bitte das Backend aktualisieren: "
+                  "sudo bambu update")
+
+_cf_proc: asyncio.subprocess.Process | None = None
+_cf_url = ""
+_cf_task: asyncio.Task[None] | None = None
+_cf_lock = asyncio.Lock()
 
 
-def _ts_bin() -> str | None:
-    """Pfad zum tailscale-CLI. Nur echte, ausführbare Dateien zählen —
-    Docker erzeugt für fehlende Host-Mounts (z. B. /usr/bin/tailscale)
-    sonst ein VERZEICHNIS am Mount-Point, das `which` fälschlich findet."""
-    candidates = [
-        shutil.which(TAILSCALE) or "",
-        f"/usr/local/bin/{TAILSCALE}",
-        f"/usr/bin/{TAILSCALE}",
-    ]
+def _cf_bin() -> str | None:
+    """Pfad zur cloudflared-CLI. Nur echte, ausführbare Dateien zählen —
+    Docker legt für fehlende Host-Mounts sonst ein VERZEICHNIS am Mount-Point
+    an, das `which` fälschlich findet."""
+    candidates = [shutil.which(CLOUDFLARED) or "", *CF_CANDIDATES]
     for path in candidates:
         if path and os.path.isfile(path) and os.access(path, os.X_OK):
             return path
     return None
 
 
-def _ts_argv(binary: str, *args: str) -> list[str]:
-    """tailscale CLI aufrufen — im Container muss das als root via sudo.
-
-    Hintergrund: tailscaled akzeptiert Kontrollbefehle NUR von root bzw. dem
-    Operator-User — er prüft die Peer-UID an der Socket-Verbindung. chmod 777
-    am Socket allein hilft daher nicht (die Verbindung klappt, das Kommando
-    wird „abgelehnt"). Im Docker-Image darf appuser via sudoers genau dieses
-    eine Binary als root ausführen.
-    """
-    if os.geteuid() == 0:
-        return [binary, *args]
-    return ["sudo", "-n", binary, *args]
+def _extract_remote_url(text: str) -> str:
+    """Öffentliche Quick-Tunnel-URL aus einer cloudflared-Logzeile ziehen."""
+    match = CF_URL_RE.search(text)
+    return match.group(0) if match else ""
 
 
-def _ts_diagnose_sync(timeout: float = 6.0) -> tuple[dict | None, str]:
-    """`tailscale status --json` plus Fehlerursache.
+def _cf_result(installed: bool, state: str, message: str = "",
+               remote_url: str = "") -> RemoteAccessResult:
+    return RemoteAccessResult(installed=installed, state=state,
+                              remote_url=remote_url, message=message)
 
-    Returns (data, problem) mit problem in {"", "missing", "daemon_down",
-    "logged_out", "no_response"}.
-    """
-    binary = _ts_bin()
-    if binary is None:
-        return None, "missing"
-    if not os.path.exists(TS_SOCK):
-        return None, "daemon_down"
+
+async def _cf_pump_stderr(proc: asyncio.subprocess.Process) -> None:
+    global _cf_url
+    stream = proc.stderr
+    if stream is None:
+        return
+    while True:
+        raw = await stream.readline()
+        if not raw:
+            break
+        line = raw.decode("utf-8", "replace").strip()
+        if not line:
+            continue
+        logger.info(f"cloudflared: {line}")
+        url = _extract_remote_url(line)
+        if url and not _cf_url:
+            _cf_url = url
+            logger.info(f"cloudflared tunnel URL: {url}")
+
+
+async def _cf_drain(stream: asyncio.StreamReader | None) -> None:
+    if stream is None:
+        return
     try:
-        proc = subprocess.run(_ts_argv(binary, "status", "--json"),
-                              capture_output=True, text=True, timeout=timeout)
-    except Exception as e:
-        logger.warning(f"tailscale status failed: {e}")
-        return None, "no_response"
-    out = (proc.stdout or "").strip()
-    if out:
-        try:
-            return json.loads(out), ""
-        except Exception:
+        while await stream.read(4096):
             pass
-    err = ((proc.stderr or "") + out).lower()
-    if "logged out" in err or "needslogin" in err.replace(" ", ""):
-        return None, "logged_out"
-    if "no such file" in err or "not running" in err or "permission denied" in err \
-            or "connect" in err:
-        return None, "daemon_down"
-    logger.warning(f"tailscale status rc={proc.returncode} err={proc.stderr[:200]!r}")
-    return None, "no_response"
+    except Exception as e:
+        logger.debug(f"cloudflared stdout drain stopped: {e}")
 
 
-async def _ts_diagnose(timeout: float = 6.0) -> tuple[dict | None, str]:
-    import asyncio as _aio
-    return await _aio.get_running_loop().run_in_executor(None, _ts_diagnose_sync, timeout)
+async def _cf_supervise(proc: asyncio.subprocess.Process) -> None:
+    global _cf_proc, _cf_url
+    try:
+        await asyncio.gather(_cf_pump_stderr(proc), _cf_drain(proc.stdout))
+        await proc.wait()
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        logger.warning(f"cloudflared supervisor error: {e}")
+    finally:
+        if _cf_proc is proc:
+            _cf_proc = None
+            _cf_url = ""
+            logger.info("cloudflared beendet")
 
 
-def _ts_result(data: dict | None, problem: str = "") -> RemoteAccessResult:
-    if data is not None:
-        state = str(data.get("BackendState", "unknown"))
-        auth = str(data.get("AuthURL", "") or "")
-        ips = [ip for ip in (data.get("TailscaleIPs") or []) if ":" not in ip]
-        msg = "Fernzugriff aktiv." if state == "Running" and ips else ""
-        return RemoteAccessResult(installed=True, state=state, auth_url=auth,
-                                  tailscale_ip=(ips[0] if ips else None), message=msg)
-    if problem == "missing":
-        return RemoteAccessResult(installed=False, state="unavailable",
-            message="Tailscale fehlt auf dem Pi. Einmal ausführen: sudo bambu tailscale")
-    if problem == "daemon_down":
-        return RemoteAccessResult(installed=True, state="unavailable",
-            message="Tailscale-Dienst läuft nicht. Auf dem Pi: sudo bambu tailscale "
-                    "(Details: sudo bambu logs)")
-    if problem == "logged_out":
-        return RemoteAccessResult(installed=True, state="NeedsLogin",
-            message="Noch nicht bei Tailscale angemeldet — in der App "
-                    "auf Remote über Tailscale tippen.")
-    return RemoteAccessResult(installed=True, state="unavailable",
-        message="Tailscale antwortet nicht. Auf dem Pi: sudo bambu tailscale "
-                "(Details: sudo bambu logs)")
+async def _cf_stop() -> None:
+    global _cf_proc, _cf_url, _cf_task
+    proc, task = _cf_proc, _cf_task
+    _cf_proc = None
+    _cf_url = ""
+    _cf_task = None
+    if proc is not None and proc.returncode is None:
+        try:
+            proc.terminate()
+        except ProcessLookupError:
+            pass
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=5.0)
+        except (TimeoutError, ProcessLookupError):
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+            try:
+                await proc.wait()
+            except Exception:
+                pass
+    if task is not None and task is not asyncio.current_task():
+        if not task.done():
+            task.cancel()
+        try:
+            await task
+        except BaseException:
+            pass
 
 
 @router.get("/remote-access", response_model=RemoteAccessResult)
 async def remote_access_status() -> RemoteAccessResult:
-    """Aktueller Fernzugriff-Status (ohne Login)."""
-    data, problem = await _ts_diagnose()
-    return _ts_result(data, problem)
+    """Aktueller Fernzugriff-Status (reines Lesen, keine Nebenwirkungen)."""
+    if _cf_bin() is None:
+        return _cf_result(False, "unavailable", CF_MISSING_MSG)
+    if _cf_proc is not None and _cf_proc.returncode is None:
+        if _cf_url:
+            return _cf_result(True, "Running", "Fernzugriff aktiv.", _cf_url)
+        return _cf_result(True, "starting", "Tunnel startet …")
+    return _cf_result(True, "stopped", "Fernzugriff gestoppt.")
 
 
 @router.post("/remote-access", response_model=RemoteAccessResult)
 async def remote_access_start() -> RemoteAccessResult:
-    """Remote aus der App starten: Tailscale-Login anstoßen, Login-Link liefern.
+    """Cloudflare Quick Tunnel starten (kein Login, kein Konto).
 
-    Robust: `tailscale up` kann im Container scheitern (Rechte am Daemon-Socket,
-    Flag-Mismatch). Das ist KEIN Grund abzubrechen — der AuthURL steht auch im
-    `status --json` (BackendState=NeedsLogin). Wir versuchen `up`, ignorieren
-    dessen Rückgabewert und lesen den Link danach direkt aus dem Status.
+    Läuft der Tunnel bereits, wird seine URL zurückgegeben. Sonst wird
+    cloudflared gestartet und bis zu ~35 s auf die öffentliche URL gewartet.
     """
-    import asyncio as _aio
-    binary = _ts_bin()
-    if binary is None:
-        return RemoteAccessResult(installed=False, state="unavailable",
-            message="Tailscale fehlt auf dem Pi. Einmal ausführen: sudo bambu tailscale")
-    if not os.path.exists(TS_SOCK):
-        return RemoteAccessResult(installed=True, state="unavailable",
-            message="Tailscale-Dienst läuft nicht. Auf dem Pi: sudo bambu tailscale")
-
-    # Login anstoßen — Fehler NICHT hart behandeln. Der eigentliche
-    # Verbindungsstatus + AuthURL kommt unten aus `status --json`.
-    try:
-        proc = subprocess.Popen(_ts_argv(binary, "up", "--hostname", TS_HOSTNAME,
-                                         "--accept-routes"),
-                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    global _cf_proc, _cf_url, _cf_task
+    async with _cf_lock:
+        if _cf_proc is not None and _cf_proc.returncode is None and _cf_url:
+            return _cf_result(True, "Running", "Fernzugriff aktiv.", _cf_url)
+        binary = _cf_bin()
+        if binary is None:
+            return _cf_result(False, "unavailable", CF_MISSING_MSG)
+        await _cf_stop()
         try:
-            await _aio.get_running_loop().run_in_executor(None, proc.wait, 2.0)
-        except Exception:
-            pass  # läuft noch — normal
-    except Exception as e:
-        logger.warning(f"tailscale up spawn failed (non-fatal): {e}")
+            proc = await asyncio.create_subprocess_exec(
+                binary, "tunnel", "--url", CF_TARGET, "--no-autoupdate",
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        except Exception as e:
+            return _cf_result(True, "error", f"cloudflared konnte nicht starten: {e}")
+        _cf_proc = proc
+        _cf_url = ""
+        _cf_task = asyncio.create_task(_cf_supervise(proc))
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + CF_START_TIMEOUT
+        while loop.time() < deadline:
+            if _cf_url:
+                return _cf_result(True, "Running", "Fernzugriff aktiv.", _cf_url)
+            if proc.returncode is not None:
+                break
+            await asyncio.sleep(0.25)
+        await _cf_stop()
+        return _cf_result(True, "error",
+                          "cloudflared liefert keine öffentliche URL. "
+                          "Bitte später erneut versuchen.")
 
-    # Bis zu ~50 s auf Login-Link bzw. laufende Verbindung warten (die App gibt
-    # dem POST 60 s). Kein response vom CLI → klarer Fehler statt „starting".
-    no_response = 0
-    for _ in range(10):
-        data, problem = await _ts_diagnose(timeout=4.0)
-        if data is not None:
-            no_response = 0
-            state = str(data.get("BackendState", "unknown"))
-            auth = str(data.get("AuthURL", "") or "")
-            ips = [ip for ip in (data.get("TailscaleIPs") or []) if ":" not in ip]
-            if state == "Running" and ips:
-                return RemoteAccessResult(installed=True, state=state, tailscale_ip=ips[0],
-                                          message="Fernzugriff aktiv.")
-            if auth:
-                return RemoteAccessResult(installed=True, state=state, auth_url=auth,
-                                          message="Zum Aktivieren Link öffnen und anmelden.")
-        elif problem == "daemon_down":
-            return RemoteAccessResult(installed=True, state="error",
-                message="Tailscale-Dienst gestoppt. Auf dem Pi: sudo bambu tailscale")
-        elif problem == "no_response":
-            no_response += 1
-            if no_response >= 2:
-                return RemoteAccessResult(installed=True, state="error",
-                    message="Tailscale antwortet nicht. Auf dem Pi: sudo bambu tailscale "
-                            "(Details: sudo bambu logs)")
-        await _aio.sleep(1)
-    return RemoteAccessResult(installed=True, state="starting",
-                              message="Anmeldung läuft — in der App erneut antippen.")
+
+@router.delete("/remote-access", response_model=RemoteAccessResult)
+async def remote_access_stop() -> RemoteAccessResult:
+    """Cloudflare Quick Tunnel stoppen."""
+    async with _cf_lock:
+        installed = _cf_bin() is not None
+        await _cf_stop()
+    return _cf_result(installed, "stopped", "Fernzugriff gestoppt.")
 
 
 @router.get("/info")

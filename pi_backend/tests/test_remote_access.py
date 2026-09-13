@@ -1,106 +1,132 @@
-"""Tests für die Fernzugriff-Endpunkte (Tailscale) mit Fake-CLI.
+"""Tests für die Fernzugriff-Endpunkte (Cloudflare Quick Tunnel) mit Fake-CLI.
 
-Das Fake-CLI verhält sich wie das echte tailscale: `status --json` liest
-einen Zustand aus einer Datei, `up` schaltet ihn um. So lassen sich der
-Login-Flow (AuthURL) und der Running-Flow (Tailscale-IP) testen, ohne dass
-tailscaled laufen muss.
+Das Fake-`cloudflared` gibt die „quick Tunnel"-URL auf stderr aus und bleibt
+am Leben (`exec sleep`). So lässt sich der komplette Lebenszyklus
+(Start → Status → Stop) ohne echtes cloudflared und ohne Netz testen.
 """
-import asyncio
 import json
-import os
+
+import pytest
 
 from app.api import system as system_mod
 
 
-def _install_fake_cli(monkeypatch, tmp_path: "object", flip_on_up: bool = False) -> str:
-    """Fake-tailscale auf PATH legen + Zustandsdatei anlegen. Gibt den Pfad zurück.
+def _install_fake_cloudflared(monkeypatch, tmp_path, mode: str = "ok") -> str:
+    """Fake-cloudflared auf PATH legen. Gibt die erwartete URL zurück.
 
-    flip_on_up=True simuliert einen bereits authentifizierten Knoten: `up`
-    schaltet sofort auf Running um. False (Standard) simuliert eine offene
-    Anmeldung: `up` wartet, der Status bleibt NeedsLogin mit AuthURL.
+    mode="ok"   -> URL auf stderr, Prozess bleibt am Leben.
+    mode="fail" -> sofortiger Abbruch ohne URL.
     """
-    state_file = tmp_path / "ts_state.json"
-    state_file.write_text(json.dumps({"BackendState": "NeedsLogin",
-                                      "AuthURL": "https://login.tailscale.com/a/abc123"}))
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
-    fake = bin_dir / "tailscale"
-    flip_line = ('/bin/echo \'{"BackendState": "Running", '
-                 '"TailscaleIPs": ["100.64.0.2"]}\' > "$STATE"') if flip_on_up else ":"
-    script = "\n".join([
-        "#!/bin/bash",
-        f'STATE="{state_file}"',
-        'if [ "$1" = "status" ]; then',
-        '  /bin/cat "$STATE"',
-        "else",
-        f"  {flip_line}",
-        "fi",
-        "",
-    ])
+    fake = bin_dir / "cloudflared"
+    if mode == "ok":
+        script = "\n".join([
+            "#!/bin/bash",
+            'echo "Your quick Tunnel has been created! '
+            'Visit it at https://test-tunnel.trycloudflare.com" 1>&2',
+            "exec /bin/sleep 300",
+            "",
+        ])
+    else:
+        script = "\n".join([
+            "#!/bin/bash",
+            'echo "failed to start tunnel" 1>&2',
+            "exit 1",
+            "",
+        ])
     fake.write_text(script)
     fake.chmod(0o755)
     monkeypatch.setenv("PATH", str(bin_dir))
-    monkeypatch.setattr(os, "geteuid", lambda: 0)
-    sock = tmp_path / "tailscaled.sock"
-    sock.touch()
-    monkeypatch.setattr(system_mod, "TS_SOCK", str(sock))
-    return str(state_file)
+    return "https://test-tunnel.trycloudflare.com"
 
 
-def test_post_start_login_returns_auth_url(monkeypatch, tmp_path):
-    _install_fake_cli(monkeypatch, tmp_path)
-    result = asyncio.run(system_mod.remote_access_start())
-    assert result.state == "NeedsLogin"
-    assert result.auth_url == "https://login.tailscale.com/a/abc123"
-    assert result.installed is True
-    # JSON-Vertrag zur Swift-App (RemoteAccessStatus in Models.swift)
-    data = json.loads(result.model_dump_json())
-    assert set(data.keys()) == {"installed", "state", "auth_url", "tailscale_ip", "message"}
-    assert data["auth_url"] == "https://login.tailscale.com/a/abc123"
+@pytest.fixture(autouse=True)
+def _reset_state():
+    system_mod._cf_proc = None
+    system_mod._cf_url = ""
+    system_mod._cf_task = None
+    yield
+    system_mod._cf_proc = None
+    system_mod._cf_url = ""
+    system_mod._cf_task = None
 
 
-def test_post_start_already_running_returns_ip(monkeypatch, tmp_path):
-    state = _install_fake_cli(monkeypatch, tmp_path)
-    # Zustand direkt auf „verbunden" setzen
-    import pathlib
-    pathlib.Path(state).write_text(json.dumps(
-        {"BackendState": "Running", "TailscaleIPs": ["100.64.0.2", "fd7a::2"]}))
-    result = asyncio.run(system_mod.remote_access_start())
-    assert result.state == "Running"
-    assert result.tailscale_ip == "100.64.0.2"      # nur IPv4, nicht fd7a::2
-    assert result.auth_url == ""
-    assert "aktiv" in result.message
+@pytest.mark.asyncio
+async def test_start_status_stop_lifecycle(monkeypatch, tmp_path):
+    url = _install_fake_cloudflared(monkeypatch, tmp_path)
+
+    start = await system_mod.remote_access_start()
+    assert start.installed is True
+    assert start.state == "Running"
+    assert start.provider == "cloudflare"
+    assert start.remote_url == url
+    proc = system_mod._cf_proc
+    assert proc is not None
+
+    # POST erneut: schon laufend -> gleiche URL, KEIN zweiter Prozess
+    again = await system_mod.remote_access_start()
+    assert again.state == "Running"
+    assert again.remote_url == url
+    assert system_mod._cf_proc is proc
+
+    # GET ist reines Lesen und liefert dieselbe URL
+    status = await system_mod.remote_access_status()
+    assert status.state == "Running"
+    assert status.remote_url == url
+    assert status.installed is True
+
+    stop = await system_mod.remote_access_stop()
+    assert stop.state == "stopped"
+    assert stop.remote_url == ""
+    assert system_mod._cf_proc is None
 
 
-def test_post_after_up_flip_reports_ip(monkeypatch, tmp_path):
-    """POST mit NeedsLogin-Start: das Fake-CLI schaltet bei `up` auf Running um
-    (bereits angemeldet) → POST liefert direkt die Tailscale-IP."""
-    _install_fake_cli(monkeypatch, tmp_path, flip_on_up=True)
-    result = asyncio.run(system_mod.remote_access_start())
-    assert result.state == "Running"
-    assert result.tailscale_ip == "100.64.0.2"
-
-
-def test_get_status_missing_binary(monkeypatch, tmp_path):
-    monkeypatch.setenv("PATH", str(tmp_path))       # kein tailscale dort
-    monkeypatch.setattr(os, "geteuid", lambda: 0)
-    result = asyncio.run(system_mod.remote_access_status())
+@pytest.mark.asyncio
+async def test_missing_binary(monkeypatch, tmp_path):
+    monkeypatch.setenv("PATH", str(tmp_path))
+    monkeypatch.setattr(system_mod, "CF_CANDIDATES", ())
+    result = await system_mod.remote_access_status()
     assert result.installed is False
-    assert "sudo bambu tailscale" in result.message
+    assert result.state == "unavailable"
+    assert result.message
 
 
-def test_get_status_daemon_down(monkeypatch, tmp_path):
-    _install_fake_cli(monkeypatch, tmp_path)
-    monkeypatch.setattr(system_mod, "TS_SOCK", str(tmp_path / "does-not-exist.sock"))
-    result = asyncio.run(system_mod.remote_access_status())
+@pytest.mark.asyncio
+async def test_failing_binary_returns_error(monkeypatch, tmp_path):
+    _install_fake_cloudflared(monkeypatch, tmp_path, mode="fail")
+    result = await system_mod.remote_access_start()
     assert result.installed is True
-    assert "läuft nicht" in result.message
+    assert result.state == "error"
+    assert result.message
+    assert system_mod._cf_proc is None
 
 
-def test_ts_bin_skips_docker_mount_dir(monkeypatch, tmp_path):
+def test_extract_remote_url():
+    line = ("INF Your quick Tunnel has been created! "
+            "Visit it at https://foo-bar123.trycloudflare.com")
+    assert system_mod._extract_remote_url(line) == "https://foo-bar123.trycloudflare.com"
+    assert system_mod._extract_remote_url("no url here") == ""
+
+
+def test_cf_bin_skips_docker_mount_dir(monkeypatch, tmp_path):
     """Docker legt für fehlende Host-Mounts ein VERZEICHNIS an — das darf
     nicht als CLI erkannt werden (sonst schlägt der Aufruf still fehl)."""
     bin_dir = tmp_path / "bin"
-    (bin_dir / "tailscale").mkdir(parents=True)
+    (bin_dir / "cloudflared").mkdir(parents=True)
     monkeypatch.setenv("PATH", str(bin_dir))
-    assert system_mod._ts_bin() is None
+    monkeypatch.setattr(system_mod, "CF_CANDIDATES", ())
+    assert system_mod._cf_bin() is None
+
+
+def test_response_json_keys():
+    data = json.loads(system_mod.RemoteAccessResult(
+        installed=True, state="Running").model_dump_json())
+    assert set(data.keys()) == {
+        "installed", "state", "provider", "remote_url", "auth_url",
+        "tailscale_ip", "message",
+    }
+    assert data["provider"] == "cloudflare"
+    assert data["remote_url"] == ""
+    assert data["auth_url"] == ""
+    assert data["tailscale_ip"] is None

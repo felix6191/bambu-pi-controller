@@ -8,8 +8,9 @@
 #
 # Am Pi muss gar nichts eingetippt werden: Der Installer fragt KEINE
 # Druckerdaten ab. Der Pi startet ohne Drucker; die iPhone-App findet ihn,
-# verbindet sich und richtet den Drucker ein. Fernzugriff (Tailscale) wird
-# ebenfalls erst später in der App aktiviert.
+# verbindet sich und richtet den Drucker ein. Fernzugriff läuft über einen
+# Cloudflare Quick Tunnel (kein Konto, kein Login) und wird später in der
+# App aktiviert.
 #
 # Flags:
 #   --configure   Zugangs-Token neu erzeugen (Druckerdaten bleiben)
@@ -99,42 +100,6 @@ install_compose() {
     log "Docker Compose wird installiert …"
     apt-get install -y -qq docker-compose-plugin >/dev/null
     ok "Docker Compose installiert"
-}
-
-install_tailscale() {
-    # Nur installieren und bereitstellen — KEIN Login, keine Rückfrage.
-    # Der Login passiert später in der App (Einstellungen → Fernzugriff).
-    if command -v tailscale &>/dev/null; then
-        ok "Tailscale ist schon da (Login später in der App)"
-    else
-        log "Tailscale wird installiert (nur für späteren Fernzugriff, kein Login) …"
-        curl -fsSL https://tailscale.com/install.sh | sh >/dev/null 2>&1 || {
-            warn "Tailscale-Installation fehlgeschlagen — später nachholbar mit 'sudo bambu tailscale'."
-            return 0
-        }
-    fi
-    systemctl enable --now tailscaled 2>/dev/null || systemctl enable --now tailscale 2>/dev/null || true
-    # Bind-Mounts in docker-compose.yml brauchen diese Pfade, sonst startet
-    # der Container nicht. Notfalls leere Platzhalter anlegen.
-    mkdir -p /var/run/tailscale
-    if [[ ! -e /usr/bin/tailscale ]]; then
-        warn "Tailscale-CLI nicht gefunden — Fernzugriff bleibt deaktiviert, bis 'sudo bambu tailscale' läuft."
-        : > /usr/bin/tailscale && chmod 644 /usr/bin/tailscale
-    fi
-    # Socket für den Container zugänglich machen, damit die App den Login
-    # starten kann. (Sonst käme der Container nicht an den Daemon.) Der
-    # Daemon legt den Socket gern als 0600 root an — ohne chmod lehnt der
-    # Container-Benutzer jeden `tailscale up`/`status` ab ("abgelehnt").
-    # Doppelt absichern: systemd-Drop-in (überlebt Neustarts) + sofortiges chmod.
-    mkdir -p /etc/systemd/system/tailscaled.service.d
-    cat > /etc/systemd/system/tailscaled.service.d/bambu-socket.conf <<'EOF'
-[Service]
-ExecStartPost=/bin/sh -c 'chmod 777 /var/run/tailscale/tailscaled.sock /run/tailscale/tailscaled.sock 2>/dev/null || true'
-EOF
-    systemctl daemon-reload 2>/dev/null || true
-    systemctl restart tailscaled 2>/dev/null || true
-    chmod 777 /var/run/tailscale/tailscaled.sock /run/tailscale/tailscaled.sock 2>/dev/null || true
-    ok "Tailscale bereit (Login in der App unter Einstellungen → Verbindung → Remote)"
 }
 
 update_repo() {
@@ -259,7 +224,7 @@ clean_old() {
     log "Räume alte Container, Images und Build-Cache auf …"
     ( cd "$INSTALL_DIR" && sudo -u "$SERVICE_USER" docker compose down \
         --remove-orphans --rmi local ) >/dev/null 2>&1 || true
-    # Verwaiste Container/Netzwerke früherer Versionen (z. B. tailscale-Service)
+    # Verwaiste Container/Netzwerke früherer Versionen freigeben
     sudo -u "$SERVICE_USER" docker container prune -f >/dev/null 2>&1 || true
     # Alte, nicht mehr benutzte Images + Build-Cache freigeben
     sudo -u "$SERVICE_USER" docker image prune -f >/dev/null 2>&1 || true
@@ -353,8 +318,8 @@ deploy() {
 }
 
 write_iphone_sheet() {
-    # Lokal bleiben: Heimnetz-IP zuerst. Tailscale (von unterwegs) kommt
-    # später in der App dazu — nicht schon bei der Einrichtung.
+    # Lokal bleiben: Heimnetz-IP zuerst. Der Fernzugriff über den Cloudflare
+    # Quick Tunnel (kein Login) kommt später in der App dazu.
     local lan_ip api_token server_url
     lan_ip=$(hostname -I 2>/dev/null | awk '{print $1}')
     api_token=$(grep "^API_TOKEN=" "$ENV_FILE" | cut -d= -f2)
@@ -405,7 +370,7 @@ print_summary() {
     echo "  sudo bambu logs         Live-Protokoll ansehen"
     echo "  sudo bambu update       Auf neueste Version aktualisieren"
     echo "  sudo bambu reconfigure  Zugangs-Token neu erzeugen"
-    echo "  sudo bambu tailscale    Fernzugriff per Tailscale-Login aktivieren"
+    echo "  sudo bambu tunnel       Fernzugriff (Cloudflare Quick Tunnel) starten"
 }
 
 # ------------------------------------------------------------------ main ---
@@ -470,7 +435,6 @@ main() {
     install_base
     install_docker
     install_compose
-    install_tailscale
     setup_user_repo
     wizard
     setup_mdns

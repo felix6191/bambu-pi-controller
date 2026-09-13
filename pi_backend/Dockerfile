@@ -64,13 +64,24 @@ ENV PATH="/opt/venv/bin:${PATH}"
 RUN useradd -m -s /bin/bash appuser \
     && mkdir -p /data /home/appuser/.config \
     && chown -R appuser:appuser /app /data /home/appuser
-# Tailscale-Fix: tailscaled akzeptiert Kontrollbefehle NUR als root (Peer-UID),
-# chmod am Socket allein reicht nicht. Also darf appuser genau das CLI als root
-# aufrufen — das CLI ist die Host-URI-Binärdatei, die wir in den Container
-# reinmounten (/usr/local/bin/tailscale).
-RUN echo 'appuser ALL=(root) NOPASSWD: /usr/local/bin/tailscale' \
-        > /etc/sudoers.d/bambu-tailscale \
-    && chmod 440 /etc/sudoers.d/bambu-tailscale
+
+# Cloudflare Quick Tunnel für den Fernzugriff: kein Account, kein Login, kein
+# sudo — die Binärdatei läuft als Container-User. Unbekannte Architekturen
+# brechen den Build nicht ab, dort bleibt der Fernzugriff nur deaktiviert.
+RUN set -eux; \
+    case "${TARGETARCH}" in \
+        arm64) cf_arch="arm64" ;; \
+        amd64) cf_arch="amd64" ;; \
+        *) cf_arch="" ;; \
+    esac; \
+    if [ -n "$cf_arch" ]; then \
+        curl -fsSL "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${cf_arch}" \
+            -o /usr/local/bin/cloudflared; \
+        chmod +x /usr/local/bin/cloudflared; \
+        cloudflared --version; \
+    else \
+        echo "WARNUNG: unbekannte Architektur '${TARGETARCH}' — cloudflared wird nicht installiert"; \
+    fi
 USER appuser
 ENV HOME=/home/appuser
 
