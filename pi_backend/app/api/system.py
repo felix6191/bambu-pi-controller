@@ -89,16 +89,29 @@ async def set_printer_config(request: PrinterConfigRequest):
         logger.error(f"Failed to persist printer config: {e}")
         raise HTTPException(status_code=500, detail="Konnte Konfiguration nicht speichern")
 
-    # Erst prüfen, ob der Drucker überhaupt erreichbar ist (Port 8883),
-    # dann MQTT verbinden — mit ein paar Versuchen (WLAN braucht manchmal kurz).
+    # Erst prüfen, ob der Drucker überhaupt erreichbar ist (Port 8883).
+    # Wenn der Port zu ist, KEINE MQTT-Versuche mehr: die würden nur je
+    # ~14 s (6 s TCP/TLS + 8 s CONNACK-Wait) kosten und die App in ihren
+    # 60-s-Timeout laufen lassen. Fail-fast mit klarer Meldung stattdessen.
     reachable = await _printer_port_open(host, settings.printer_port)
+    if not reachable:
+        detail = app_state.last_connect_error or (
+            app_state.printer_client.last_error if app_state.printer_client else ""
+        )
+        detail_txt = f" Fehler: {detail}" if detail else ""
+        return PrinterConfigResult(
+            success=True, printer_connected=False,
+            message=f"Drucker unter {host} nicht erreichbar (Port {settings.printer_port}). "
+                    "Gleiches WLAN? Drucker an? LAN-Modus + Entwicklermodus am Drucker an? IP prüfen." + detail_txt)
+    # Port offen → MQTT verbinden, max. 2 Versuche (je ~14 s). WLAN braucht
+    # manchmal einen Moment, mehr als 2 Versuche sprengen das App-Timeout.
     connected = False
-    for attempt in range(3):
+    for attempt in range(2):
         connected = await app_state.reconnect_printer()
         if connected:
             break
         import asyncio as _aio
-        await _aio.sleep(1.5 * (attempt + 1))
+        await _aio.sleep(2.0)
 
     if connected:
         return PrinterConfigResult(success=True, printer_connected=True,
@@ -107,11 +120,6 @@ async def set_printer_config(request: PrinterConfigRequest):
         app_state.printer_client.last_error if app_state.printer_client else ""
     )
     detail_txt = f" Fehler: {detail}" if detail else ""
-    if not reachable:
-        return PrinterConfigResult(
-            success=True, printer_connected=False,
-            message=f"Drucker unter {host} nicht erreichbar (Port {settings.printer_port}). "
-                    "Gleiches WLAN? Drucker an? LAN-Modus am Drucker an? IP prüfen." + detail_txt)
     return PrinterConfigResult(
         success=True, printer_connected=False,
         message="Drucker ist erreichbar, lehnt aber die Verbindung ab. "

@@ -334,7 +334,11 @@ struct SetupFlowView: View {
                 if res.printerConnected { withAnimation { step = 5 } }
                 return
             } catch {
-                last = error.localizedDescription
+                if let api = error as? APIError, case .timeout = api {
+                    last = "Der Pi antwortet nicht rechtzeitig (Drucker an? Gleiches WLAN? LAN-Modus + Entwicklermodus an? IP noch aktuell?). Einfach erneut tippen."
+                } else {
+                    last = error.localizedDescription
+                }
                 if attempt == 1 { try? await Task.sleep(nanoseconds: 3_000_000_000) }
             }
         }

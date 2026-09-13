@@ -65,7 +65,7 @@ class BambuMQTTClient:
     def last_error(self) -> str:
         return self._last_error
 
-    async def connect(self) -> None:
+    async def connect(self, connect_timeout: float = 6.0, wait_timeout: float = 8.0) -> None:
         if not self.host or not self.serial:
             raise RuntimeError("Printer host/serial not configured")
         loop = asyncio.get_running_loop()
@@ -89,14 +89,44 @@ class BambuMQTTClient:
         self._client.on_disconnect = self._on_disconnect
         self._client.on_message = self._on_message
 
-        await loop.run_in_executor(None, self._client.connect, self.host, self.port, 60)
+        # paho connect() blockiert (TCP + TLS-Handshake) ohne eigenes Timeout —
+        # das 3. Argument ist nur Keepalive, kein Timeout! Ohne wait_for hängt
+        # hier bei SYN-Drop (Cloud-Modus, falsches WLAN, Gast-Isolation) der
+        # Executor ewig und die App läuft in ihren 60-s-Timeout.
+        try:
+            await asyncio.wait_for(
+                loop.run_in_executor(None, self._client.connect, self.host, self.port, 10),
+                timeout=connect_timeout,
+            )
+        except asyncio.TimeoutError:
+            try:
+                self._client.loop_stop()
+            except Exception:
+                pass
+            raise TimeoutError(
+                f"Keine TCP/TLS-Verbindung zu {self.host}:{self.port} "
+                f"in {connect_timeout:.0f} s (Drucker an? Gleiches WLAN? LAN-Modus an?)"
+            )
+        except OSError as e:
+            raise TimeoutError(f"Drucker {self.host}:{self.port} verweigert Verbindung ({e})")
+        except Exception as e:
+            raise TimeoutError(f"MQTT-Verbindung zu {self.host}:{self.port} fehlgeschlagen ({e})")
         self._client.loop_start()
 
-        for _ in range(30):
+        steps = max(1, int(wait_timeout / 0.5))
+        for _ in range(steps):
             if self._connected or self._last_error:
                 break
             await asyncio.sleep(0.5)
         if not self._connected:
+            try:
+                self._client.loop_stop()
+            except Exception:
+                pass
+            try:
+                self._client.disconnect()
+            except Exception:
+                pass
             raise TimeoutError(
                 f"Keine MQTT-Verbindung zu {self.host}:{self.port}"
                 + (f" ({self._last_error})" if self._last_error else "")

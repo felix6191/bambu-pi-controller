@@ -86,9 +86,10 @@ class APIService: ObservableObject {
             let printer_access_code: String
         }
         // Eigener, längerer Timeout: Der Pi versucht die MQTT-Verbindung
-        // inkl. mehrerer Versuche, das dauert länger als 15 s.
+        // (Port-Check + max. 2 Versuche, je ~14 s). 90 s lassen dem Pi
+        // genug Luft, ohne dass die App zu früh aufgibt.
         guard !baseURL.isEmpty, let url = URL(string: "\(baseURL)/api/v1/system/printer-config") else { throw APIError.invalidURL }
-        var req = URLRequest(url: url, timeoutInterval: 60)
+        var req = URLRequest(url: url, timeoutInterval: 90)
         req.httpMethod = "POST"
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
