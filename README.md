@@ -86,8 +86,8 @@ Der Installer prüft alles selbst (System, Docker, Auto-Discovery per mDNS) und 
 
 ### iPhone
 - iOS 17+
-- Xcode 15+ zum Bauen
-- Tailscale App installiert
+- BambuController App (kommt in den App Store)
+- Tailscale App installiert (nur für Fernzugriff von unterwegs)
 
 ## Manuelle Installation (falls gewünscht)
 
@@ -117,17 +117,14 @@ cd ..
 docker compose up -d --build
 ```
 
-### 5. iOS App bauen
-1. `ios_app/BambuController.xcodeproj` in Xcode öffnen
-2. Team & Bundle Identifier setzen
-3. Auf iPhone deployen (Cmd+R)
+### 5. iOS App installieren
+App aus dem App Store laden (der Quellcode der App ist nicht Teil dieses Repos).
 
 ### 6. App konfigurieren
 Normalfall: nichts tippen — App öffnen, Pi antippen, „Verbinden".
 Nur als Fallback (z. B. Tailscale von unterwegs) in der App unter **Einstellungen**:
 - **Server URL**: `http://<tailscale-ip-des-pi>:8000`
 - **API Token**: Der gleiche wie in `.env` auf dem Pi (`sudo bambu iphone` zeigt ihn)
-- **Tailscale verwenden**: AN
 - **Auto-Verbinden**: AN
 - **Verbindung testen** tippen
 
@@ -144,13 +141,6 @@ bambu-pi-controller/
 │   ├── Dockerfile
 │   ├── pyproject.toml
 │   └── .env.example
-├── ios_app/
-│   └── BambuController/       # SwiftUI iOS App
-│       ├── Models/            # Data Models
-│       ├── Services/          # APIService, WebSocketService, PiDiscovery (mDNS)
-│       ├── ViewModels/        # PrinterViewModel
-│       ├── Views/             # Dashboard, Controls, Camera, Settings, SetupFlow
-│       └── Extensions/        # Color extensions
 ├── pi_helpers/
 │   ├── bambu                  # Helfer: sudo bambu {status|iphone|logs|update|…}
 │   └── bambu-pi-avahi.service # mDNS-Anzeige _bambu-pi._tcp (richtet install.sh ein)
@@ -213,11 +203,7 @@ pytest
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-### iOS App
-```bash
-cd ios_app
-# In Xcode öffnen und bauen (Cmd+R)
-```
+(Hinweis: Die iOS App liegt nur lokal und kommt über den App Store — sie ist nicht Teil dieses Repos.)
 
 ## Troubleshooting
 
