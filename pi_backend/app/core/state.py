@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 printer_client: BambuMQTTClient | None = None
 status_subscribers: set[WebSocket] = set()
 _connect_lock = asyncio.Lock()
+last_connect_error: str = ""
 
 
 def get_printer_client() -> BambuMQTTClient:
@@ -51,9 +52,10 @@ async def reconnect_printer() -> bool:
     from app.core.config import settings
     from app.mqtt.client import BambuMQTTClient
 
-    global printer_client
+    global printer_client, last_connect_error
     async with _connect_lock:
         if not settings.printer_host or not settings.printer_serial:
+            last_connect_error = "Host/Seriennummer fehlen"
             logger.warning("reconnect_printer: host/serial missing, skipping")
             return False
         old = printer_client
@@ -68,6 +70,7 @@ async def reconnect_printer() -> bool:
         )
         try:
             await printer_client.connect()
+            last_connect_error = ""
             logger.info("Printer reconnected via phone setup")
             if old is not None:
                 try:
@@ -76,6 +79,7 @@ async def reconnect_printer() -> bool:
                     pass
             return True
         except Exception as e:
+            last_connect_error = str(e)[:300] or e.__class__.__name__
             logger.error(f"reconnect_printer failed: {e}")
             # Keep the new (disconnected) client so status endpoints report cleanly
             if old is not None and old.connected:

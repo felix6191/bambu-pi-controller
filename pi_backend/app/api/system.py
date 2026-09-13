@@ -103,15 +103,19 @@ async def set_printer_config(request: PrinterConfigRequest):
     if connected:
         return PrinterConfigResult(success=True, printer_connected=True,
                                    message="Drucker verbunden! 🎉")
+    detail = app_state.last_connect_error or (
+        app_state.printer_client.last_error if app_state.printer_client else ""
+    )
+    detail_txt = f" Fehler: {detail}" if detail else ""
     if not reachable:
         return PrinterConfigResult(
             success=True, printer_connected=False,
             message=f"Drucker unter {host} nicht erreichbar (Port {settings.printer_port}). "
-                    "Gleiches WLAN? Drucker an? LAN-Modus am Drucker an? IP prüfen.")
+                    "Gleiches WLAN? Drucker an? LAN-Modus am Drucker an? IP prüfen." + detail_txt)
     return PrinterConfigResult(
         success=True, printer_connected=False,
         message="Drucker ist erreichbar, lehnt aber die Verbindung ab. "
-                "Access Code (8 Zeichen) und Seriennummer prüfen — LAN-/Entwicklermodus am Drucker an?")
+                "Access Code (8 Zeichen) und Seriennummer prüfen — LAN-/Entwicklermodus am Drucker an?" + detail_txt)
 
 
 async def _printer_port_open(host: str, port: int, timeout: float = 3.0) -> bool:

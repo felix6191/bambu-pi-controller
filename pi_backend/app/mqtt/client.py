@@ -51,6 +51,7 @@ class BambuMQTTClient:
         self._connected = False
         self._sequence = 0
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._last_error = ""
 
     @property
     def status(self) -> PrinterStatus:
@@ -60,15 +61,22 @@ class BambuMQTTClient:
     def connected(self) -> bool:
         return self._connected
 
+    @property
+    def last_error(self) -> str:
+        return self._last_error
+
     async def connect(self) -> None:
         if not self.host or not self.serial:
             raise RuntimeError("Printer host/serial not configured")
         loop = asyncio.get_running_loop()
         self._loop = loop
+        self._last_error = ""
+        # Bambu-Broker spricht MQTT 3.1.1 — MQTTv5 kann in einem stillen
+        # Verbindungs-Timeout enden.
         self._client = mqtt.Client(
             mqtt.CallbackAPIVersion.VERSION2,
             client_id=f"bambu-pi-{uuid.uuid4().hex[:8]}",
-            protocol=mqtt.MQTTv5,
+            protocol=mqtt.MQTTv311,
         )
         self._client.username_pw_set("bblp", self.access_code)
         if self.use_tls:
@@ -85,11 +93,14 @@ class BambuMQTTClient:
         self._client.loop_start()
 
         for _ in range(30):
-            if self._connected:
+            if self._connected or self._last_error:
                 break
             await asyncio.sleep(0.5)
-        else:
-            raise TimeoutError(f"No MQTT connection to {self.host}:{self.port}")
+        if not self._connected:
+            raise TimeoutError(
+                f"Keine MQTT-Verbindung zu {self.host}:{self.port}"
+                + (f" ({self._last_error})" if self._last_error else "")
+            )
 
         report = BambuTopic.REPORT.value.format(serial=self.serial)
         self._client.subscribe(report, qos=1)
@@ -111,16 +122,34 @@ class BambuMQTTClient:
 
     # -- paho callbacks (network thread) ------------------------------------
 
-    def _on_connect(self, client: mqtt.Client, userdata: Any, flags: dict, reason_code: int, properties: Any) -> None:
-        if reason_code == 0:
+    @staticmethod
+    def _reason_ok(reason_code: Any) -> bool:
+        """Mit paho v2 (CallbackAPIVersion.VERSION2) ist reason_code ein
+        ReasonCode-Objekt — `== 0` ist dort unzuverlässig."""
+        try:
+            return not reason_code.is_failure
+        except Exception:
+            pass
+        try:
+            return int(reason_code) == 0
+        except Exception:
+            return reason_code == 0
+
+    def _on_connect(self, client: mqtt.Client, userdata: Any, flags: dict, reason_code: Any, properties: Any = None) -> None:
+        if self._reason_ok(reason_code):
             self._connected = True
-            logger.debug("MQTT connected")
+            self._last_error = ""
+            logger.info("MQTT connected")
         else:
+            self._connected = False
+            self._last_error = f"CONNACK {reason_code}"
             logger.error(f"MQTT connection failed: {reason_code}")
 
-    def _on_disconnect(self, client: mqtt.Client, userdata: Any, reason_code: int, properties: Any) -> None:
+    def _on_disconnect(self, client: mqtt.Client, userdata: Any, *args: Any) -> None:
+        # Signatur unterscheidet sich je nach paho-Version (v2 hat zusätzlich
+        # disconnect_flags) — *args fängt beides ab.
         self._connected = False
-        logger.warning(f"MQTT disconnected: {reason_code}")
+        logger.warning(f"MQTT disconnected: {args[-2] if len(args) >= 2 else args}")
 
     def _on_message(self, client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessage) -> None:
         try:

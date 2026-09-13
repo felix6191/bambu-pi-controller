@@ -85,9 +85,22 @@ class APIService: ObservableObject {
             let printer_serial: String
             let printer_access_code: String
         }
-        return try await request("/system/printer-config", method: "POST",
-            body: try JSONEncoder().encode(Body(printer_host: host, printer_serial: serial, printer_access_code: code)),
-            PrinterConfigResult.self)
+        // Eigener, längerer Timeout: Der Pi versucht die MQTT-Verbindung
+        // inkl. mehrerer Versuche, das dauert länger als 15 s.
+        guard !baseURL.isEmpty, let url = URL(string: "\(baseURL)/api/v1/system/printer-config") else { throw APIError.invalidURL }
+        var req = URLRequest(url: url, timeoutInterval: 60)
+        req.httpMethod = "POST"
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONEncoder().encode(Body(printer_host: host, printer_serial: serial, printer_access_code: code))
+        let (data, resp): (Data, URLResponse)
+        do { (data, resp) = try await session.data(for: req) }
+        catch let e as URLError where e.code == .timedOut { throw APIError.timeout }
+        catch { throw APIError.network(error) }
+        guard let http = resp as? HTTPURLResponse else { throw APIError.invalidResponse }
+        if http.statusCode == 401 { throw APIError.unauthorized }
+        guard 200...299 ~= http.statusCode else { throw APIError.httpError(http.statusCode, data) }
+        return try JSONDecoder().decode(PrinterConfigResult.self, from: data)
     }
 
     // Pairing ohne Tippen: Status/Claim gehen an eine BELIEBIGE Pi-URL (ohne Token)
