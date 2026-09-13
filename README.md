@@ -2,11 +2,19 @@
 
 Dein Bambu Lab A1 — vom iPhone aus überwachen und steuern, von überall. Der Raspberry Pi ist die Brücke, Tailscale der sichere Tunnel. Keine Vorkenntnisse nötig.
 
-> ## ⚡ Schnellinstallation auf dem Pi — 1 Befehl
-> Standard **Raspberry Pi OS (64-bit)** per offiziellem **Raspberry Pi Imager** flashen, Pi starten, Terminal öffnen, einfügen, Enter:
+> ## ⚡ Ein Befehl — installieren oder aktualisieren
+> Standard **Raspberry Pi OS (64-bit)** per offiziellem **Raspberry Pi Imager** flashen, Pi starten, Terminal öffnen, einfügen, Enter.
+>
+> **Neu installieren:**
 > ```bash
 > curl -fsSL https://raw.githubusercontent.com/felix6191/bambu-pi-controller/main/install.sh | sudo bash
 > ```
+>
+> **Nur aktualisieren** (lädt immer die neueste Version, räumt Altes weg):
+> ```bash
+> curl -fsSL https://raw.githubusercontent.com/felix6191/bambu-pi-controller/main/update.sh | sudo bash
+> ```
+>
 > Bei allen Fragen einfach **ENTER** drücken (nichts tippen — der Rest passiert in der App). Danach: App öffnen → Pi antippen → **Verbinden** → Drucker wählen → ✅ fertig.
 
 ## 🚀 In 3 Schritten startklar (kein Vorwissen nötig, kein Custom-Image)
