@@ -2,19 +2,20 @@
 import ipaddress
 import json
 import os
+import platform
 import shutil
 import socket
 import subprocess
 import time
 from pathlib import Path
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
-import psutil
-import platform
-from loguru import logger
 
-from app.core.config import settings, persisted_printer_file
+import psutil
+from fastapi import APIRouter, HTTPException
+from loguru import logger
+from pydantic import BaseModel, Field
+
 from app.core import state as app_state
+from app.core.config import persisted_printer_file, settings
 
 router = APIRouter()
 
@@ -40,7 +41,7 @@ class PrinterConfigResult(BaseModel):
 
 
 @router.get("/printer-config")
-async def get_printer_config():
+async def get_printer_config() -> dict:
     """What the Pi currently knows (never exposes the access code)."""
     client = app_state.printer_client
     return {
@@ -53,7 +54,7 @@ async def get_printer_config():
 
 
 @router.post("/printer-config", response_model=PrinterConfigResult)
-async def set_printer_config(request: PrinterConfigRequest):
+async def set_printer_config(request: PrinterConfigRequest) -> PrinterConfigResult:
     """Phone-based setup: store printer credentials on the Pi and connect now.
 
     Lets users walk to the printer with their phone, type the values shown on
@@ -102,7 +103,8 @@ async def set_printer_config(request: PrinterConfigRequest):
         return PrinterConfigResult(
             success=True, printer_connected=False,
             message=f"Drucker unter {host} nicht erreichbar (Port {settings.printer_port}). "
-                    "Gleiches WLAN? Drucker an? LAN-Modus + Entwicklermodus am Drucker an? IP prüfen." + detail_txt)
+                    "Gleiches WLAN? Drucker an? LAN-Modus + Entwicklermodus "
+                    "am Drucker an? IP prüfen." + detail_txt)
     # Port offen → MQTT verbinden, max. 2 Versuche (je ~14 s). WLAN braucht
     # manchmal einen Moment, mehr als 2 Versuche sprengen das App-Timeout.
     connected = False
@@ -123,7 +125,8 @@ async def set_printer_config(request: PrinterConfigRequest):
     return PrinterConfigResult(
         success=True, printer_connected=False,
         message="Drucker ist erreichbar, lehnt aber die Verbindung ab. "
-                "Access Code (8 Zeichen) und Seriennummer prüfen — LAN-/Entwicklermodus am Drucker an?" + detail_txt)
+                "Access Code (8 Zeichen) und Seriennummer prüfen — "
+                "LAN-/Entwicklermodus am Drucker an?" + detail_txt)
 
 
 async def _printer_port_open(host: str, port: int, timeout: float = 3.0) -> bool:
@@ -156,7 +159,18 @@ TS_SOCK = "/var/run/tailscale/tailscaled.sock"
 
 
 def _ts_bin() -> str | None:
-    return shutil.which(TAILSCALE)
+    """Pfad zum tailscale-CLI. Nur echte, ausführbare Dateien zählen —
+    Docker erzeugt für fehlende Host-Mounts (z. B. /usr/bin/tailscale)
+    sonst ein VERZEICHNIS am Mount-Point, das `which` fälschlich findet."""
+    candidates = [
+        shutil.which(TAILSCALE) or "",
+        f"/usr/local/bin/{TAILSCALE}",
+        f"/usr/bin/{TAILSCALE}",
+    ]
+    for path in candidates:
+        if path and os.path.isfile(path) and os.access(path, os.X_OK):
+            return path
+    return None
 
 
 def _ts_argv(binary: str, *args: str) -> list[str]:
@@ -173,7 +187,7 @@ def _ts_argv(binary: str, *args: str) -> list[str]:
     return ["sudo", "-n", binary, *args]
 
 
-def _ts_diagnose_sync() -> tuple[dict | None, str]:
+def _ts_diagnose_sync(timeout: float = 6.0) -> tuple[dict | None, str]:
     """`tailscale status --json` plus Fehlerursache.
 
     Returns (data, problem) mit problem in {"", "missing", "daemon_down",
@@ -186,7 +200,7 @@ def _ts_diagnose_sync() -> tuple[dict | None, str]:
         return None, "daemon_down"
     try:
         proc = subprocess.run(_ts_argv(binary, "status", "--json"),
-                              capture_output=True, text=True, timeout=6)
+                              capture_output=True, text=True, timeout=timeout)
     except Exception as e:
         logger.warning(f"tailscale status failed: {e}")
         return None, "no_response"
@@ -199,15 +213,16 @@ def _ts_diagnose_sync() -> tuple[dict | None, str]:
     err = ((proc.stderr or "") + out).lower()
     if "logged out" in err or "needslogin" in err.replace(" ", ""):
         return None, "logged_out"
-    if "no such file" in err or "not running" in err or "permission denied" in err or "connect" in err:
+    if "no such file" in err or "not running" in err or "permission denied" in err \
+            or "connect" in err:
         return None, "daemon_down"
     logger.warning(f"tailscale status rc={proc.returncode} err={proc.stderr[:200]!r}")
     return None, "no_response"
 
 
-async def _ts_diagnose() -> tuple[dict | None, str]:
+async def _ts_diagnose(timeout: float = 6.0) -> tuple[dict | None, str]:
     import asyncio as _aio
-    return await _aio.get_running_loop().run_in_executor(None, _ts_diagnose_sync)
+    return await _aio.get_running_loop().run_in_executor(None, _ts_diagnose_sync, timeout)
 
 
 def _ts_result(data: dict | None, problem: str = "") -> RemoteAccessResult:
@@ -223,23 +238,26 @@ def _ts_result(data: dict | None, problem: str = "") -> RemoteAccessResult:
             message="Tailscale fehlt auf dem Pi. Einmal ausführen: sudo bambu tailscale")
     if problem == "daemon_down":
         return RemoteAccessResult(installed=True, state="unavailable",
-            message="Tailscale-Dienst läuft nicht. Auf dem Pi: sudo bambu tailscale (Details: sudo bambu logs)")
+            message="Tailscale-Dienst läuft nicht. Auf dem Pi: sudo bambu tailscale "
+                    "(Details: sudo bambu logs)")
     if problem == "logged_out":
         return RemoteAccessResult(installed=True, state="NeedsLogin",
-            message="Noch nicht bei Tailscale angemeldet — unten einrichten.")
+            message="Noch nicht bei Tailscale angemeldet — in der App "
+                    "auf Remote über Tailscale tippen.")
     return RemoteAccessResult(installed=True, state="unavailable",
-        message="Tailscale antwortet nicht. Auf dem Pi: sudo bambu tailscale (Details: sudo bambu logs)")
+        message="Tailscale antwortet nicht. Auf dem Pi: sudo bambu tailscale "
+                "(Details: sudo bambu logs)")
 
 
 @router.get("/remote-access", response_model=RemoteAccessResult)
-async def remote_access_status():
+async def remote_access_status() -> RemoteAccessResult:
     """Aktueller Fernzugriff-Status (ohne Login)."""
     data, problem = await _ts_diagnose()
     return _ts_result(data, problem)
 
 
 @router.post("/remote-access", response_model=RemoteAccessResult)
-async def remote_access_start():
+async def remote_access_start() -> RemoteAccessResult:
     """Remote aus der App starten: Tailscale-Login anstoßen, Login-Link liefern.
 
     Robust: `tailscale up` kann im Container scheitern (Rechte am Daemon-Socket,
@@ -259,7 +277,8 @@ async def remote_access_start():
     # Login anstoßen — Fehler NICHT hart behandeln. Der eigentliche
     # Verbindungsstatus + AuthURL kommt unten aus `status --json`.
     try:
-        proc = subprocess.Popen(_ts_argv(binary, "up", "--hostname", TS_HOSTNAME, "--accept-routes"),
+        proc = subprocess.Popen(_ts_argv(binary, "up", "--hostname", TS_HOSTNAME,
+                                         "--accept-routes"),
                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         try:
             await _aio.get_running_loop().run_in_executor(None, proc.wait, 2.0)
@@ -268,9 +287,13 @@ async def remote_access_start():
     except Exception as e:
         logger.warning(f"tailscale up spawn failed (non-fatal): {e}")
 
-    for _ in range(15):
-        data, problem = await _ts_diagnose()
+    # Bis zu ~50 s auf Login-Link bzw. laufende Verbindung warten (die App gibt
+    # dem POST 60 s). Kein response vom CLI → klarer Fehler statt „starting".
+    no_response = 0
+    for _ in range(10):
+        data, problem = await _ts_diagnose(timeout=4.0)
         if data is not None:
+            no_response = 0
             state = str(data.get("BackendState", "unknown"))
             auth = str(data.get("AuthURL", "") or "")
             ips = [ip for ip in (data.get("TailscaleIPs") or []) if ":" not in ip]
@@ -283,13 +306,19 @@ async def remote_access_start():
         elif problem == "daemon_down":
             return RemoteAccessResult(installed=True, state="error",
                 message="Tailscale-Dienst gestoppt. Auf dem Pi: sudo bambu tailscale")
+        elif problem == "no_response":
+            no_response += 1
+            if no_response >= 2:
+                return RemoteAccessResult(installed=True, state="error",
+                    message="Tailscale antwortet nicht. Auf dem Pi: sudo bambu tailscale "
+                            "(Details: sudo bambu logs)")
         await _aio.sleep(1)
     return RemoteAccessResult(installed=True, state="starting",
-                              message="Anmeldung läuft — bitte gleich den Link öffnen.")
+                              message="Anmeldung läuft — in der App erneut antippen.")
 
 
 @router.get("/info")
-async def system_info():
+async def system_info() -> dict:
     return {
         "hostname": platform.node(),
         "platform": platform.platform(),
@@ -310,7 +339,7 @@ async def system_info():
 
 
 @router.get("/network")
-async def network_info():
+async def network_info() -> dict:
     interfaces = {}
     for name, addrs in psutil.net_if_addrs().items():
         interfaces[name] = [
@@ -402,7 +431,7 @@ def _ssdp_discover_sync(timeout: float = 4.0) -> dict[str, int]:
                 last_send = time.monotonic()
             try:
                 data, addr = sock.recvfrom(65535)
-            except socket.timeout:
+            except TimeoutError:
                 continue
             except OSError:
                 break
@@ -418,7 +447,7 @@ def _ssdp_discover_sync(timeout: float = 4.0) -> dict[str, int]:
 
 
 @router.post("/printer-scan")
-async def printer_scan(deep: bool = True):
+async def printer_scan(deep: bool = True) -> dict:
     """Drucker im Heimnetz finden.
 
     1) SSDP (Bambu-Standard) — schnell und zuverlässig.
